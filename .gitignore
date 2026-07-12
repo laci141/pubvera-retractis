@@ -1,5 +1,6 @@
-*.exe
-bin/
+# Windows binaries only — Linux CLI is committed
+bin/*.exe
+bin/server*
 *.bak
 data/
 .env
