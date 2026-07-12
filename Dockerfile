@@ -7,7 +7,7 @@
 # ---- Stage 1: build web server for linux/amd64 ----
 FROM golang:1.26-alpine AS web-builder
 WORKDIR /build
-COPY go.mod go.sum ./
+COPY go.mod ./
 COPY main.go index.html ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/server ./main.go
 
