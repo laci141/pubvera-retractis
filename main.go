@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -58,25 +57,28 @@ func cliBinary() string {
 	return "./retraction-checker"
 }
 
+// runCLI executes the CLI with the given args, returning stdout bytes.
+// stderr is captured separately so CLI warnings never corrupt the JSON body.
+func runCLI(args ...string) ([]byte, error) {
+	bin := cliBinary()
+	cmd := exec.Command(bin, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("CLI error: %v — stderr: %s", err, stderr.String())
+	}
+	return stdout.Bytes(), nil
+}
+
+func writeRaw(w http.ResponseWriter, b []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(b)
+}
+
 // ------ API: /api/check ------
 type checkRequest struct {
 	DOI string `json:"doi"`
-}
-
-type checkResponse struct {
-	Retracted  bool   `json:"retracted"`
-	UpdateType string `json:"update_type,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Notice     string `json:"notice,omitempty"`
-	Title      string `json:"title,omitempty"`
-}
-
-type cliCheckResponse struct {
-	Retracted  bool   `json:"retracted"`
-	UpdateType string `json:"update_type"`
-	Reason     string `json:"reason"`
-	Notice     string `json:"notice"`
-	Title      string `json:"title"`
 }
 
 func handleCheck(w http.ResponseWriter, r *http.Request) {
@@ -94,53 +96,20 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bin := cliBinary()
-	cmd := exec.Command(bin, "check", req.DOI, "--json")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	out, err := runCLI("check", req.DOI, "--json")
 	if err != nil {
-		errMsg := fmt.Sprintf("CLI error: %v, stderr: %s", err, stderr.String())
-		log.Print(errMsg)
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-
-	var cliResp cliCheckResponse
-	if err := json.Unmarshal(stdout.Bytes(), &cliResp); err != nil {
-		// fallback: parse text lines
-		out := stdout.String()
-		resp := checkResponse{Retracted: false}
-		lines := strings.Split(out, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "retracted:") {
-				val := strings.TrimSpace(strings.TrimPrefix(line, "retracted:"))
-				resp.Retracted = val == "true"
-			} else if strings.HasPrefix(line, "update_type:") {
-				resp.UpdateType = strings.TrimSpace(strings.TrimPrefix(line, "update_type:"))
-			} else if strings.HasPrefix(line, "reason:") {
-				resp.Reason = strings.TrimSpace(strings.TrimPrefix(line, "reason:"))
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	resp := checkResponse{
-		Retracted:  cliResp.Retracted,
-		UpdateType: cliResp.UpdateType,
-		Reason:     cliResp.Reason,
-		Notice:     cliResp.Notice,
-		Title:      cliResp.Title,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// The check command emits a flat JSON object — pass it through unchanged
+	// so the frontend sees exactly: {input, doi, title, retracted, update_type, published, signals}
+	writeRaw(w, out)
 }
 
 // ------ API: /api/search ------
+// Uses `works search --query <q> --rows <n>` which hits the LIVE Crossref API
+// (NOT the local FTS5 `search` command, which needs synced data).
 type searchRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit,omitempty"`
@@ -164,73 +133,27 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	bin := cliBinary()
-	args := []string{"search", req.Query, "--limit", fmt.Sprintf("%d", req.Limit), "--json"}
-	cmd := exec.Command(bin, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	out, err := runCLI("works", "search",
+		"--query", req.Query,
+		"--rows", fmt.Sprintf("%d", req.Limit),
+		"--json")
 	if err != nil {
-		errMsg := fmt.Sprintf("CLI search error: %v, stderr: %s", err, stderr.String())
-		log.Print(errMsg)
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-
-	// A CLI kimenete JSON
-	var cliOutput map[string]interface{}
-	if err := json.Unmarshal(stdout.Bytes(), &cliOutput); err != nil {
-		http.Error(w, "CLI output is not valid JSON", http.StatusInternalServerError)
-		return
-	}
-
-	// Átalakítás a frontend által várt formátumra:
-	// { "results": { "message": { "items": [...] } } }
-	var items []interface{}
-
-	// Próbáljuk kiszedni a találatokat a CLI JSON-jából
-	if res, ok := cliOutput["results"].([]interface{}); ok {
-		items = res
-	} else if res, ok := cliOutput["items"].([]interface{}); ok {
-		items = res
-	} else if res, ok := cliOutput["message"].(map[string]interface{}); ok {
-		if itemsArr, ok := res["items"].([]interface{}); ok {
-			items = itemsArr
-		}
-	} else {
-		// Ha egyéb, próbáljuk az egészet egy tömbben visszaadni
-		items = []interface{}{cliOutput}
-	}
-
-	response := map[string]interface{}{
-		"results": map[string]interface{}{
-			"message": map[string]interface{}{
-				"items": items,
-			},
-		},
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	// The CLI already returns the exact Crossref envelope the frontend expects:
+	//   { meta:{source}, results:{ status, message-type, message:{ total-results, items:[...] } } }
+	// Pass it through unchanged.
+	writeRaw(w, out)
 }
 
 // ------ API: /api/superseded ------
+// `superseded <doi> --limit <n> --json` returns:
+//   { doi, title, retracted, from_year, query, related:[ {title, doi, publication_year, cited_by_count, id} ] }
 type supersededRequest struct {
-	DOI string `json:"doi"`
-}
-
-type supersededResponse struct {
-	Superseded bool     `json:"superseded"`
-	Reason     string   `json:"reason,omitempty"`
-	Results    []string `json:"results,omitempty"`
-}
-
-type cliSupersededResponse struct {
-	Results []struct {
-		Title string `json:"title"`
-		DOI   string `json:"doi"`
-	} `json:"results"`
+	DOI   string `json:"doi"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 func handleSuperseded(w http.ResponseWriter, r *http.Request) {
@@ -247,31 +170,18 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing doi", http.StatusBadRequest)
 		return
 	}
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
 
-	bin := cliBinary()
-	cmd := exec.Command(bin, "superseded", req.DOI, "--json")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	out, err := runCLI("superseded", req.DOI,
+		"--limit", fmt.Sprintf("%d", req.Limit),
+		"--json")
 	if err != nil {
-		errMsg := fmt.Sprintf("CLI superseded error: %v, stderr: %s", err, stderr.String())
-		log.Print(errMsg)
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	var cliResp cliSupersededResponse
-	if err := json.Unmarshal(stdout.Bytes(), &cliResp); err != nil {
-		resp := supersededResponse{Superseded: false, Results: []string{stdout.String()}}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-	results := make([]string, len(cliResp.Results))
-	for i, item := range cliResp.Results {
-		results[i] = fmt.Sprintf("%s (%s)", item.Title, item.DOI)
-	}
-	resp := supersededResponse{Superseded: true, Results: results}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// Pass through the object with related[] — the frontend renders the table + citation bars.
+	writeRaw(w, out)
 }
