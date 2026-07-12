@@ -68,14 +68,15 @@ type checkResponse struct {
 	UpdateType string `json:"update_type,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Notice     string `json:"notice,omitempty"`
+	Title      string `json:"title,omitempty"`
 }
 
-// CLI JSON válasz struktúrája (a CLI által visszaadott mezők)
 type cliCheckResponse struct {
 	Retracted  bool   `json:"retracted"`
 	UpdateType string `json:"update_type"`
 	Reason     string `json:"reason"`
 	Notice     string `json:"notice"`
+	Title      string `json:"title"`
 }
 
 func handleCheck(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +95,6 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bin := cliBinary()
-	// Helyes parancs: check <doi> --json
 	cmd := exec.Command(bin, "check", req.DOI, "--json")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -106,10 +106,10 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
-	// A CLI JSON-t ad vissza – próbáljuk dekódolni
+
 	var cliResp cliCheckResponse
 	if err := json.Unmarshal(stdout.Bytes(), &cliResp); err != nil {
-		// Ha nem JSON, próbáljuk szövegként feldolgozni (régi mód)
+		// fallback: parse text lines (régi szöveges formátum)
 		out := stdout.String()
 		resp := checkResponse{Retracted: false}
 		lines := strings.Split(out, "\n")
@@ -128,12 +128,13 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
-	// JSON válasz
+
 	resp := checkResponse{
 		Retracted:  cliResp.Retracted,
 		UpdateType: cliResp.UpdateType,
 		Reason:     cliResp.Reason,
 		Notice:     cliResp.Notice,
+		Title:      cliResp.Title,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -168,7 +169,6 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bin := cliBinary()
-	// Helyes parancs: search <query> --limit <n> --json
 	args := []string{"search", req.Query, "--limit", fmt.Sprintf("%d", req.Limit), "--json"}
 	cmd := exec.Command(bin, args...)
 	var stdout, stderr bytes.Buffer
@@ -181,10 +181,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
-	// A CLI JSON-t ad vissza – továbbítjuk
 	var raw json.RawMessage
 	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
-		// Ha nem JSON, próbáljuk szövegként becsomagolni
 		resp := searchResponse{Results: json.RawMessage(fmt.Sprintf(`{"raw":"%s"}`, stdout.String()))}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -229,7 +227,6 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bin := cliBinary()
-	// Helyes parancs: superseded <doi> --json
 	cmd := exec.Command(bin, "superseded", req.DOI, "--json")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -241,10 +238,8 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
-	// JSON dekódolás
 	var cliResp cliSupersededResponse
 	if err := json.Unmarshal(stdout.Bytes(), &cliResp); err != nil {
-		// Ha nem JSON, adjuk vissza szövegként
 		resp := supersededResponse{Superseded: false, Results: []string{stdout.String()}}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
