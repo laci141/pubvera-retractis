@@ -502,7 +502,15 @@
              (d.retracted ? '<span class="badge bad" style="font-size:0.85rem;padding:0.2rem 0.7rem">⚠ RETRACTED</span>'
                           : '<span class="badge ok" style="font-size:0.85rem;padding:0.2rem 0.7rem">✓ Not retracted</span>') +
              (d.from_year ? ' &nbsp;newer research since ' + esc(d.from_year) : '') + '</p>';
-        const rel = Array.isArray(d.related) ? d.related : [];
+        const normDoi = s => {
+          let x = String(s || '').toLowerCase().trim();
+          if (x.indexOf('doi:') === 0) x = x.slice(4);
+          x = x.split('doi.org/').pop();
+          return x.trim();
+        };
+        const selfDoi = normDoi(d.doi || doi);
+        const rel = (Array.isArray(d.related) ? d.related : [])
+          .filter(r => normDoi(r.doi) !== selfDoi);
         if (!rel.length) {
           h += '<div class="error-box">No related newer works found.</div>';
         } else {
