@@ -5,3 +5,5 @@ bin/server*
 data/
 .env
 .DS_Store
+pubvera-retractis
+pubvera-retractis.exe

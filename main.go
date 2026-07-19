@@ -31,7 +31,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	log.Printf("retraction-checker-web listening on 0.0.0.0:%s (CLI=%s)", port, cliBinary())
+	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s)", port, cliBinary())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>Retraction Checker — Is that paper still good science?</title>
+  <title>Retractis — Retraction & Research Integrity Checker</title>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Retractis — check any DOI against known retractions and expressions of concern, and discover newer research that supersedes it. Powered by Crossref and OpenAlex open data. No login, no API keys.">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -224,6 +226,34 @@
     .bar-chart { height: 14px; background: linear-gradient(90deg, #00d4ff, #7c3aed); border-radius: 4px; flex: 1; max-width: 150px; opacity: 0.85; }
     .bar-chart:hover { opacity: 1; }
 
+    /* EXPORT SUITE + QUICK FILTER (export-suite skill) */
+    .meta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; gap: 12px; flex-wrap: wrap; }
+    .meta { font-size: 0.82rem; color: #99a; }
+    .dl {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); color: #cdd6ea;
+      padding: 4px 14px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+      transition: 0.2s; white-space: nowrap; flex-shrink: 0;
+    }
+    .dl:hover { background: rgba(255,255,255,0.15); border-color: var(--color, #00d4ff); color: #fff; }
+    .dl-group { display: flex; gap: 8px; flex-shrink: 0; align-items: center; flex-wrap: wrap; }
+    .qfilter {
+      background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.16); border-radius: 999px;
+      padding: 4px 14px; color: #e8eef7; font-size: 0.78rem; width: 170px;
+    }
+    .qfilter:focus { outline: none; border-color: var(--color, #00d4ff); }
+    .qcount { color: #7dd3fc; font-size: 0.78rem; font-weight: 600; margin-left: 6px; }
+
+    /* SORTABLE COLUMN HEADERS */
+    th { cursor: pointer; user-select: none; }
+    th::after { content: " ⇅"; opacity: 0.35; }
+    th[data-dir="asc"]::after { content: " ↑"; opacity: 1; color: var(--color, #00d4ff); }
+    th[data-dir="desc"]::after { content: " ↓"; opacity: 1; color: var(--color, #00d4ff); }
+
+    /* LEGAL DISCLAIMER */
+    .disclaimer-wrap { max-width: 1100px; margin: 0 auto; padding: 0 2rem 1rem; }
+    .disclaimer { padding: 1.4rem 1.8rem; font-size: 0.88rem; color: #9aa3b2; line-height: 1.7; }
+    .disclaimer strong { color: #c9d2e0; }
+
     /* LOADING + ERROR */
     .loading {
       display: inline-block; width: 22px; height: 22px;
@@ -264,6 +294,9 @@
         backdrop-filter: blur(11px);
         -webkit-backdrop-filter: blur(11px);
       }
+      .qfilter { width: 130px; }
+      .disclaimer-wrap { padding: 0 1.25rem 1rem; }
+      .disclaimer { padding: 1rem 1.2rem; }
     }
   </style>
 </head>
@@ -271,8 +304,8 @@
 
   <!-- HERO -->
   <section class="hero">
-    <h1>🔬 Retraction Checker</h1>
-    <p>Check whether a scientific paper has been retracted, and discover newer research that supersedes it. Powered by open data from Crossref, OpenAlex, and PubMed — no login, no keys.</p>
+    <h1>🔬 Pubvera · Retractis</h1>
+    <p>Check any DOI against known retractions and expressions of concern, and discover newer research that supersedes it — powered by Crossref and OpenAlex open data. No login, no keys.</p>
     <div class="chips">
       <button class="chip" onclick="openModal('check', '10.1016/S0140-6736(97)11096-0')">Wakefield 1998 (retracted)</button>
       <button class="chip" onclick="openModal('search', 'CRISPR')">CRISPR</button>
@@ -355,8 +388,19 @@
     </div>
   </div>
 
+  <!-- LEGAL DISCLAIMER -->
+  <section class="disclaimer-wrap">
+    <div class="glass-panel disclaimer">
+      <strong>Independence &amp; data disclaimer.</strong>
+      Retractis is an independent research-integrity tool. It is not affiliated with, endorsed by,
+      or sponsored by Retraction Watch, Crossref, or any publisher. Retraction data is sourced from
+      public open datasets and may be incomplete or out of date. A negative result does not prove
+      an article is free of concerns — always verify against the publisher's version of record.
+    </div>
+  </section>
+
   <footer>
-    Data: Crossref · OpenAlex · PubMed — open scholarly metadata. Not legal or medical advice.
+    Pubvera · Retractis — Data: Crossref (incl. Retraction Watch data) · OpenAlex — open scholarly metadata. Not legal or medical advice.
   </footer>
 
   <script>
@@ -378,6 +422,203 @@
         return '<a href="https://doi.org/' + encodeURI(d) + '" target="_blank" rel="noopener noreferrer">' + esc(d) + '</a>';
       }
       return esc(d);
+    }
+
+    // --- EXPORT SUITE (CSV / Excel / BibTeX / JSON) -------------------------
+    // Global store: each module keeps its last raw result for the download buttons.
+    const lastData = { check: null, search: null, superseded: null };
+
+    // Shared helper: pulls the row array out of whatever the module stored.
+    function rowsFromLastData(key) {
+      const d = lastData[key];
+      if (!d) return null;
+      if (Array.isArray(d)) return d;
+      if (typeof d === 'object') {
+        for (const k of Object.keys(d)) { if (Array.isArray(d[k])) return d[k]; }
+      }
+      return null;
+    }
+
+    // CSV (RFC4180). Excel-safe: BOM + CRLF + explicit separator hint.
+    function toCSV(rows) {
+      const cols = [];
+      rows.forEach(r => Object.keys(r || {}).forEach(k => { if (!cols.includes(k)) cols.push(k); }));
+      const cell = v => {
+        // Booleans must be exported as text, otherwise Excel localises them
+        // (Hungarian Excel shows IGAZ / HAMIS instead of TRUE / FALSE).
+        if (v === null || v === undefined || v === false) return "";
+        if (v === true) return "Yes";
+        let s = (typeof v === "object") ? JSON.stringify(v) : String(v);
+        if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      };
+      // "sep=," tells Excel the delimiter regardless of the user's locale.
+      const lines = ["sep=,", cols.map(cell).join(",")];
+      rows.forEach(r => lines.push(cols.map(c => cell(r ? r[c] : "")).join(",")));
+      return "\uFEFF" + lines.join("\r\n");
+    }
+
+    function downloadCSV(key, filename) {
+      if (!lastData[key]) { alert("Run a check first."); return; }
+      const rows = rowsFromLastData(key);
+      if (!rows || !rows.length) { alert("CSV export is not available for this result — use JSON."); return; }
+      triggerDownload(new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" }), filename);
+    }
+
+    // XLSX: centered numbers, left-aligned long text, styled header,
+    // retracted rows highlighted in red.
+    function downloadXLSX(key, filename) {
+      if (!lastData[key]) { alert("Run a check first."); return; }
+      const rows = rowsFromLastData(key);
+      if (!rows || !rows.length) { alert("Excel export is not available for this result — use JSON."); return; }
+      const cols = [];
+      rows.forEach(r => Object.keys(r || {}).forEach(k => { if (!cols.includes(k)) cols.push(k); }));
+      const aoa = [cols].concat(rows.map(r => cols.map(c => {
+        const v = r ? r[c] : "";
+        if (v === null || v === undefined || v === false) return "";
+        if (v === true) return "Yes";
+        return (typeof v === "object") ? JSON.stringify(v) : v;
+      })));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // Measure each column: long free text goes left and wide, short values centre.
+      const colInfo = cols.map(c => {
+        let max = String(c).length, sum = 0, cnt = 0;
+        rows.forEach(r => { const v = r ? r[c] : ""; const L = String(v == null ? "" : v).length; if (L > max) max = L; sum += L; cnt++; });
+        const avg = cnt ? sum / cnt : 0;
+        const isLong = (max > 22) || (avg > 18);
+        return { wch: Math.min(Math.max(max + 2, 9), isLong ? 90 : 24), left: isLong };
+      });
+
+      const retIdx = cols.indexOf("Retracted");
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      const centerH = { vertical: "center", horizontal: "center", wrapText: false };
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        // Retracted rows get a red fill so they are impossible to miss in Excel.
+        const flagged = retIdx >= 0 && R > 0 && aoa[R][retIdx] === "Yes";
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[addr]) continue;
+          if (R === 0) {
+            ws[addr].s = { font: { bold: true, color: { rgb: "FFFFFF" } }, alignment: centerH,
+              fill: { fgColor: { rgb: "4472C4" } },
+              border: { bottom: { style: "thin", color: { rgb: "999999" } } } };
+          } else {
+            ws[addr].s = { alignment: { vertical: "center",
+              horizontal: (colInfo[C] && colInfo[C].left) ? "left" : "center", wrapText: false } };
+            if (flagged) {
+              ws[addr].s.fill = { fgColor: { rgb: "FFC7CE" } };
+              ws[addr].s.font = { color: { rgb: "9C0006" } };
+            }
+          }
+        }
+      }
+      ws["!cols"] = colInfo.map(ci => ({ wch: ci.wch }));
+      ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Retractis");
+      XLSX.writeFile(wb, filename);
+    }
+
+    // BibTeX: @article entries; retracted papers MUST carry a RETRACTED note
+    // so anyone importing into Zotero/Mendeley sees the retraction immediately.
+    function bibKey(r, i) {
+      const t = String(r.title || r.Title || "item").split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "");
+      const y = Number(r.year || r.Year || r.publication_year || 0) || "";
+      return (t || "ref").toLowerCase() + (y || "") + "_" + (i + 1);
+    }
+    function bibEsc(v) { return String(v == null ? "" : v).replace(/[{}\\]/g, "").trim(); }
+
+    function toBibTeX(rows) {
+      const out = [];
+      rows.forEach((r, i) => {
+        const title = bibEsc(r.title || r.Title || r.display_name || "");
+        if (!title) return;
+        const doi = String(r.doi || r.DOI || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
+        const year = Number(r.year || r.Year || r.publication_year || 0);
+        const journal = bibEsc(r.journal || r.Journal || r.venue || "");
+        let authors = r.authors || r.Authors || r.author || "";
+        if (Array.isArray(authors)) {
+          authors = authors.map(a => bibEsc(typeof a === "string" ? a : (a && (a.name || a.author_name) || ""))).filter(Boolean).join(" and ");
+        } else {
+          authors = bibEsc(authors).replace(/;\s*/g, " and ");
+        }
+        const lines = ["@article{" + bibKey(r, i) + ","];
+        lines.push("  title   = {" + title + "},");
+        if (authors) lines.push("  author  = {" + authors + "},");
+        if (journal) lines.push("  journal = {" + journal + "},");
+        if (year)    lines.push("  year    = {" + year + "},");
+        if (doi)     lines.push("  doi     = {" + doi + "},");
+        if (doi)     lines.push("  url     = {https://doi.org/" + doi + "},");
+        const retracted = r.Retracted === "Yes" || r.retracted === true;
+        if (retracted) {
+          const bits = [];
+          if (r["Retraction type"]) bits.push("update type: " + r["Retraction type"]);
+          if (r.Signals) bits.push("signals: " + r.Signals);
+          lines.push("  note    = {" + bibEsc("RETRACTED" + (bits.length ? ": " + bits.join(" — ") : "") + " (per Crossref retraction data)") + "}");
+        }
+        lines.push("}");
+        out.push(lines.join("\n"));
+      });
+      return out.join("\n\n") + "\n";
+    }
+
+    // Fallback @misc citation when a stored result has no citable paper rows.
+    const ANALYSIS_LABEL = { check: "Retraction check", search: "Works search", superseded: "Newer research check" };
+    function analysisBibTeX(key, rows) {
+      const label = ANALYSIS_LABEL[key] || "Research-integrity analysis";
+      let scope = "";
+      const metaEl = document.querySelector("#" + key + "-results .meta");
+      if (metaEl) scope = metaEl.textContent.replace(/\s*·\s*\d+\s*\/\s*\d+\s*rows\s*$/, "").trim();
+      const y = new Date().getFullYear();
+      const title = bibEsc(label + (scope ? ": " + scope : ""));
+      return "@misc{retractis_" + key + "_" + y + ",\n" +
+        "  title  = {" + title + "},\n" +
+        "  author = {{Retractis}},\n" +
+        "  year   = {" + y + "},\n" +
+        "  howpublished = {Pubvera Retractis research-integrity tool},\n" +
+        "  note   = {Analysis of " + (rows ? rows.length : 0) + " records; metadata from Crossref and OpenAlex open data},\n" +
+        "  url    = {" + window.location.origin + "/}\n" +
+        "}\n";
+    }
+
+    function downloadBibTeX(key, filename) {
+      if (!lastData[key]) { alert("Run a check first."); return; }
+      const rows = rowsFromLastData(key);
+      const papers = (rows || []).filter(r => r && (r.title || r.Title || r.display_name));
+      const text = papers.length ? toBibTeX(papers) : analysisBibTeX(key, rows);
+      triggerDownload(new Blob([text], { type: "application/x-bibtex;charset=utf-8" }), filename);
+    }
+
+    function downloadJSON(key, filename) {
+      const d = lastData[key];
+      if (!d) { alert("Run a check first."); return; }
+      triggerDownload(new Blob([JSON.stringify(d, null, 2)], { type: "application/json" }), filename);
+    }
+
+    function triggerDownload(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Result header: count + quick filter + download buttons, one helper for all modules.
+    function metaRow(text, key, filename) {
+      const csvName = String(filename).replace(/\.json$/i, ".csv");
+      const xlsxName = String(filename).replace(/\.json$/i, ".xlsx");
+      const bibName = String(filename).replace(/\.json$/i, ".bib");
+      const bibTitle = "BibTeX citations — retracted papers are flagged in the note field";
+      return '<div class="meta-row"><span class="meta">' + text + '<span class="qcount"></span></span>' +
+        '<span class="dl-group">' +
+        '<input class="qfilter" type="text" placeholder="🔍 Filter results…">' +
+        '<button class="dl" title="' + bibTitle + '" onclick="downloadBibTeX(\'' + key + '\',\'' + bibName + '\')">⬇ BibTeX</button>' +
+        '<button class="dl" onclick="downloadXLSX(\'' + key + '\',\'' + xlsxName + '\')">⬇ Excel</button>' +
+        '<button class="dl" onclick="downloadCSV(\'' + key + '\',\'' + csvName + '\')">⬇ CSV</button>' +
+        '<button class="dl" onclick="downloadJSON(\'' + key + '\',\'' + filename + '\')">⬇ JSON</button>' +
+        '</span></div>';
     }
 
     // --- modal plumbing -----------------------------------------------------
@@ -435,7 +676,17 @@
       if (!doi) { out.innerHTML = '<div class="error-box">Please enter a DOI.</div>'; return; }
       try {
         const d = await callApi('/api/check', { doi }, out, document.getElementById('check-btn'));
-        let h = '';
+        lastData.check = [{
+          DOI: d.doi || doi,
+          Title: d.title || '',
+          Year: (String(d.published || '').match(/^\d{4}/) || [''])[0],
+          Retracted: d.retracted ? 'Yes' : 'No',
+          'Retraction type': d.retracted ? (d.update_type || '') : '',
+          Published: d.published || '',
+          Signals: Array.isArray(d.signals) ? d.signals.join('; ') : '',
+          Source: 'Crossref'
+        }];
+        let h = metaRow('1 record checked', 'check', 'retractis-check.json');
         if (d.retracted) {
           h += '<div class="badge bad">⚠ RETRACTED</div>';
         } else {
@@ -466,22 +717,34 @@
         const items = msg.items || [];
         const total = msg['total-results'];
         const source = (d.meta && d.meta.source) || 'live';
-        let h = '<p class="meta-line">' + esc(total != null ? total.toLocaleString() : items.length) +
-                ' results · source: ' + esc(source) + '</p>';
-        if (!items.length) {
+        // Flatten Crossref items into export-friendly rows (client-side only —
+        // authors and journal are already present in the same API response).
+        const rows = items.map(it => {
+          const dp = it.published && it.published['date-parts'] && it.published['date-parts'][0];
+          const dpAlt = it['published-print'] && it['published-print']['date-parts'] && it['published-print']['date-parts'][0];
+          const dpOn = it['published-online'] && it['published-online']['date-parts'] && it['published-online']['date-parts'][0];
+          return {
+            DOI: String(it.DOI || ''),
+            Title: Array.isArray(it.title) ? (it.title[0] || '') : (it.title || ''),
+            Authors: Array.isArray(it.author) ? it.author.map(a => [a.given, a.family].filter(Boolean).join(' ')).filter(Boolean).join('; ') : '',
+            Journal: Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || ''),
+            Year: (dp && dp[0]) || (dpAlt && dpAlt[0]) || (dpOn && dpOn[0]) || '',
+            Source: 'Crossref'
+          };
+        });
+        lastData.search = rows;
+        let h = '';
+        if (!rows.length) {
+          h += '<p class="meta-line">0 results · source: ' + esc(source) + '</p>';
           h += '<div class="error-box">No results found.</div>';
         } else {
+          h += metaRow(esc(total != null ? total.toLocaleString() : rows.length) + ' results · source: ' + esc(source), 'search', 'retractis-search.json');
           h += '<div class="table-wrap"><table><tr><th>#</th><th>Title</th><th>Year</th><th>DOI</th></tr>';
-          items.forEach((it, i) => {
-            const title = Array.isArray(it.title) ? it.title[0] : it.title;
-            const dp = it.published && it.published['date-parts'] && it.published['date-parts'][0];
-            const dpAlt = it['published-print'] && it['published-print']['date-parts'] && it['published-print']['date-parts'][0];
-            const dpOn = it['published-online'] && it['published-online']['date-parts'] && it['published-online']['date-parts'][0];
-            const year = (dp && dp[0]) || (dpAlt && dpAlt[0]) || (dpOn && dpOn[0]) || '—';
+          rows.forEach((r, i) => {
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
-                 '<td>' + esc(title || '(untitled)') + '</td>' +
-                 '<td>' + esc(year) + '</td>' +
-                 '<td>' + doiLink(it.DOI) + '</td></tr>';
+                 '<td>' + esc(r.Title || '(untitled)') + '</td>' +
+                 '<td>' + esc(r.Year || '—') + '</td>' +
+                 '<td>' + doiLink(r.DOI) + '</td></tr>';
           });
           h += '</table></div>';
         }
@@ -511,9 +774,17 @@
         const selfDoi = normDoi(d.doi || doi);
         const rel = (Array.isArray(d.related) ? d.related : [])
           .filter(r => normDoi(r.doi) !== selfDoi);
+        lastData.superseded = rel.map(r => ({
+          DOI: String(r.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, ''),
+          Title: r.title || '',
+          Year: r.publication_year || '',
+          Citations: r.cited_by_count || 0,
+          Source: 'OpenAlex'
+        }));
         if (!rel.length) {
           h += '<div class="error-box">No related newer works found.</div>';
         } else {
+          h += metaRow(rel.length + ' related works' + (d.from_year ? ' since ' + esc(d.from_year) : ''), 'superseded', 'retractis-superseded.json');
           // Scale citation bars to the max cited_by_count (min 1 to avoid /0).
           const maxCited = Math.max(1, ...rel.map(r => r.cited_by_count || 0));
           h += '<div class="table-wrap"><table><tr><th>#</th><th>Related work</th><th>Year</th><th>Citations</th></tr>';
@@ -532,6 +803,49 @@
         out.innerHTML = h;
       } catch (err) { showError(out, err); }
     }
+
+    // --- quick filter (one delegated handler serves every module) -----------
+    document.addEventListener('input', e => {
+      if (!e.target.classList.contains('qfilter')) return;
+      const scope = e.target.closest('.results');
+      const table = scope && scope.querySelector('table');
+      if (!table) return;
+      const q = e.target.value.trim().toLowerCase();
+      const rows = Array.from(table.rows).filter(r => !r.querySelector('th'));
+      let shown = 0;
+      rows.forEach(r => {
+        const hit = !q || r.textContent.toLowerCase().includes(q);
+        r.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      const qc = scope.querySelector('.qcount');
+      if (qc) qc.textContent = q ? ' · ' + shown + ' / ' + rows.length + ' rows' : '';
+    });
+
+    // --- sortable columns (single delegated click handler on th) ------------
+    document.addEventListener('click', e => {
+      const th = e.target.closest('th');
+      if (!th || !th.closest('.results')) return;
+      const table = th.closest('table');
+      const headRow = th.parentElement;
+      const idx = Array.prototype.indexOf.call(headRow.children, th);
+      const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+      Array.from(headRow.children).forEach(cell => { delete cell.dataset.dir; });
+      th.dataset.dir = dir;
+      const rows = Array.from(table.rows).filter(r => r !== headRow);
+      if (!rows.length) return;
+      const val = r => { const c = r.cells[idx]; return c ? c.textContent.trim() : ''; };
+      // Auto-detect numeric columns (years, citation counts like "1,234") vs text.
+      const num = s => parseFloat(String(s).replace(/[^0-9.\-]/g, ''));
+      const numeric = rows.every(r => { const v = val(r); return v !== '' && !isNaN(num(v)); });
+      rows.sort((a, b) => {
+        const av = val(a), bv = val(b);
+        const cmp = numeric ? (num(av) - num(bv)) : av.localeCompare(bv, undefined, { sensitivity: 'base' });
+        return dir === 'asc' ? cmp : -cmp;
+      });
+      const tbody = rows[0].parentElement;
+      rows.forEach(r => tbody.appendChild(r));
+    });
   </script>
 </body>
 </html>

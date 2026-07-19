@@ -1,3 +1,3 @@
-module retraction-checker-web
+module pubvera-retractis
 
 go 1.26
