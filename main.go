@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"os/exec"
 	"time"
 )
+
+const cliRunTimeout = 120 * time.Second
 
 func main() {
 	port := os.Getenv("PORT")
@@ -31,7 +34,8 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s)", port, cliBinary())
+	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s, timeout=%s, slots=%d)",
+		port, cliBinary(), cliRunTimeout, cliSem.capacity())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
@@ -57,15 +61,28 @@ func cliBinary() string {
 	return "./retraction-checker"
 }
 
-// runCLI executes the CLI with the given args, returning stdout bytes.
+// runCLI runs the child CLI bounded by a concurrency slot and a deadline.
 // stderr is captured separately so CLI warnings never corrupt the JSON body.
-func runCLI(args ...string) ([]byte, error) {
+// The slot is acquired BEFORE the timeout so queuing time does not eat into
+// the 120s CLI budget.
+func runCLI(ctx context.Context, args ...string) ([]byte, error) {
+	if err := cliSem.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer cliSem.release()
+
+	ctx, cancel := context.WithTimeout(ctx, cliRunTimeout)
+	defer cancel()
+
 	bin := cliBinary()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("CLI stopped after %s: %v", cliRunTimeout, ctxErr)
+		}
 		return nil, fmt.Errorf("CLI error: %v — stderr: %s", err, stderr.String())
 	}
 	return stdout.Bytes(), nil
@@ -96,20 +113,16 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := runCLI("check", req.DOI, "--json")
+	out, err := runCLI(r.Context(), "check", req.DOI, "--json")
 	if err != nil {
 		log.Print(err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeCLIError(w, err)
 		return
 	}
-	// The check command emits a flat JSON object — pass it through unchanged
-	// so the frontend sees exactly: {input, doi, title, retracted, update_type, published, signals}
 	writeRaw(w, out)
 }
 
 // ------ API: /api/search ------
-// Uses `works search --query <q> --rows <n>` which hits the LIVE Crossref API
-// (NOT the local FTS5 `search` command, which needs synced data).
 type searchRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit,omitempty"`
@@ -133,24 +146,19 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	out, err := runCLI("works", "search",
+	out, err := runCLI(r.Context(), "works", "search",
 		"--query", req.Query,
 		"--rows", fmt.Sprintf("%d", req.Limit),
 		"--json")
 	if err != nil {
 		log.Print(err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeCLIError(w, err)
 		return
 	}
-	// The CLI already returns the exact Crossref envelope the frontend expects:
-	//   { meta:{source}, results:{ status, message-type, message:{ total-results, items:[...] } } }
-	// Pass it through unchanged.
 	writeRaw(w, out)
 }
 
 // ------ API: /api/superseded ------
-// `superseded <doi> --limit <n> --json` returns:
-//   { doi, title, retracted, from_year, query, related:[ {title, doi, publication_year, cited_by_count, id} ] }
 type supersededRequest struct {
 	DOI   string `json:"doi"`
 	Limit int    `json:"limit,omitempty"`
@@ -174,14 +182,13 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	out, err := runCLI("superseded", req.DOI,
+	out, err := runCLI(r.Context(), "superseded", req.DOI,
 		"--limit", fmt.Sprintf("%d", req.Limit),
 		"--json")
 	if err != nil {
 		log.Print(err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeCLIError(w, err)
 		return
 	}
-	// Pass through the object with related[] — the frontend renders the table + citation bars.
 	writeRaw(w, out)
 }
