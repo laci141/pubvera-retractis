@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -20,20 +21,17 @@ func main() {
 	if port == "" {
 		port = "8092"
 	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/check", handleCheck)
 	mux.HandleFunc("/api/search", handleSearch)
 	mux.HandleFunc("/api/superseded", handleSuperseded)
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/", handleRoot)
-
 	srv := &http.Server{
 		Addr:              "0.0.0.0:" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
 	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s, timeout=%s, slots=%d)",
 		port, cliBinary(), cliRunTimeout, cliSem.capacity())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -61,15 +59,54 @@ func cliBinary() string {
 	return "./retraction-checker"
 }
 
+// cliCmdLabel names the subcommand for the log without leaking user input.
+// Flags and their values are dropped, so a DOI or a search query never
+// reaches the log; only the leading verbs survive ("check", "works search").
+func cliCmdLabel(args []string) string {
+	var verbs []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			break
+		}
+		verbs = append(verbs, a)
+		if len(verbs) == 2 {
+			break
+		}
+	}
+	if len(verbs) == 0 {
+		return "?"
+	}
+	// The second word is only a verb for "works search"; for "check <doi>"
+	// it would be the DOI itself, so keep it only when it is a known verb.
+	if len(verbs) == 2 && verbs[1] != "search" {
+		verbs = verbs[:1]
+	}
+	return strings.Join(verbs, " ")
+}
+
 // runCLI runs the child CLI bounded by a concurrency slot and a deadline.
 // stderr is captured separately so CLI warnings never corrupt the JSON body.
 // The slot is acquired BEFORE the timeout so queuing time does not eat into
 // the 120s CLI budget.
+//
+// Every run is logged with the "cli:" prefix. Three facts are recorded that
+// nothing else in this service exposes: how long the run waited for a
+// concurrency slot, how long the child process itself took, and how many
+// bytes it produced. A sudden drop in bytes is the earliest visible sign of
+// an upstream quota or API failure. User input is never logged — see
+// cliCmdLabel.
 func runCLI(ctx context.Context, args ...string) ([]byte, error) {
+	label := cliCmdLabel(args)
+	waitStart := time.Now()
+
 	if err := cliSem.acquire(ctx); err != nil {
+		log.Printf("cli: busy cmd=%s wait_ms=%d err=%v",
+			label, time.Since(waitStart).Milliseconds(), err)
 		return nil, err
 	}
 	defer cliSem.release()
+
+	waitMS := time.Since(waitStart).Milliseconds()
 
 	ctx, cancel := context.WithTimeout(ctx, cliRunTimeout)
 	defer cancel()
@@ -79,12 +116,22 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	runStart := time.Now()
 	if err := cmd.Run(); err != nil {
+		elapsed := time.Since(runStart).Milliseconds()
 		if ctxErr := ctx.Err(); ctxErr != nil {
+			log.Printf("cli: fail cmd=%s wait_ms=%d elapsed_ms=%d err=deadline",
+				label, waitMS, elapsed)
 			return nil, fmt.Errorf("CLI stopped after %s: %v", cliRunTimeout, ctxErr)
 		}
+		log.Printf("cli: fail cmd=%s wait_ms=%d elapsed_ms=%d err=%v",
+			label, waitMS, elapsed, err)
 		return nil, fmt.Errorf("CLI error: %v — stderr: %s", err, stderr.String())
 	}
+
+	log.Printf("cli: ok cmd=%s wait_ms=%d elapsed_ms=%d bytes=%d",
+		label, waitMS, time.Since(runStart).Milliseconds(), stdout.Len())
 	return stdout.Bytes(), nil
 }
 
