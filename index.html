@@ -657,17 +657,34 @@
     // Last query per module, so exported files record what produced them.
     const lastQuery = { check: "", search: "", superseded: "" };
 
+    // True result-set size per module, as reported by the API (Crossref
+    // "total-results"). The downloaded array is only the first page, so its
+    // length says nothing about how many works actually matched. null means
+    // "the endpoint returned no total" — never a guess.
+    const lastTotal = { check: null, search: null, superseded: null };
+
+    // Rows the analysis matched in total. Falls back to the exported row count
+    // when no total was measured, so an export never states a number the API
+    // did not give us.
+    function analysisTotal(key, rows) {
+      const t = lastTotal[key];
+      if (typeof t === "number" && isFinite(t)) return t;
+      return rows ? rows.length : 0;
+    }
+
     const ANALYSIS_LABEL = { check: "Retraction check", search: "Works search", superseded: "Newer research check" };
 
     // Provenance line embedded in every exported file: app, analysis, query,
     // visible-vs-total row count, active filters, source, date.
     function exportHeader(key, rows) {
-      const total = (rowsFromLastData(key) || []).length;
+      const total = analysisTotal(key, rows);
       const shown = rows ? rows.length : 0;
       const parts = ["Retractis export"];
       if (ANALYSIS_LABEL[key]) parts.push(ANALYSIS_LABEL[key]);
       if (lastQuery[key]) parts.push('query: "' + lastQuery[key] + '"');
-      parts.push(total && total !== shown ? ("showing " + shown + " of " + total + " rows") : (shown + " rows"));
+      // Always "showing N of M", even when N === M: the absence of truncation
+      // should be stated, not inferred from a missing phrase.
+      parts.push("showing " + shown.toLocaleString("en-US") + " of " + total.toLocaleString("en-US") + " rows");
       const sc = exportRows(key).scope;
       if (sc) parts.push(sc);
       parts.push("source: Crossref (incl. Retraction Watch data) / OpenAlex");
@@ -850,7 +867,7 @@
           query: lastQuery[key] || "",
           filters: view.scope,
           rows_exported: view.rows.length,
-          rows_total: (rowsFromLastData(key) || []).length,
+          rows_total: analysisTotal(key, view.rows),
           source: "Crossref (incl. Retraction Watch data) / OpenAlex",
           exported_at: new Date().toISOString()
         },
@@ -1064,24 +1081,45 @@
       const out = document.getElementById('search-results');
       if (!query) { out.innerHTML = '<div class="error-box">Please enter a search query.</div>'; return; }
       lastQuery.search = query;
+      lastTotal.search = null;   // a failed run must not leave the previous query's total behind
       try {
         const d = await callApi('/api/search', { query, limit }, out, document.getElementById('search-btn'));
         const msg = (d.results && d.results.message) || {};
         const items = msg.items || [];
         const total = msg['total-results'];
+        // Keep the true match count: the exports report it as rows_total, and
+        // without this it would be rendered once and lost.
+        lastTotal.search = (typeof total === 'number' && isFinite(total)) ? total : null;
         const source = (d.meta && d.meta.source) || 'live';
+        // Crossref search items already carry "updated-by": the notices that
+        // update this work. A retraction/withdrawal notice there is exactly the
+        // signal /api/check reports, so the status costs no extra request.
+        const noticeDate = u => {
+          const p = u && u.updated && u.updated['date-parts'] && u.updated['date-parts'][0];
+          return Array.isArray(p) ? p.map((n, i) => i ? String(n).padStart(2, '0') : String(n)).join('-') : '';
+        };
+        const retractionOf = it => {
+          const ups = Array.isArray(it['updated-by']) ? it['updated-by'] : [];
+          return ups.filter(u => u && /retract|withdraw|removal/i.test(String(u.type || u.label || '')))
+                    .sort((a, b) => noticeDate(b).localeCompare(noticeDate(a)))[0] || null;
+        };
         // Flatten Crossref items into export-friendly rows (client-side only —
         // authors and journal are already present in the same API response).
         const rows = items.map(it => {
           const dp = it.published && it.published['date-parts'] && it.published['date-parts'][0];
           const dpAlt = it['published-print'] && it['published-print']['date-parts'] && it['published-print']['date-parts'][0];
           const dpOn = it['published-online'] && it['published-online']['date-parts'] && it['published-online']['date-parts'][0];
+          const ret = retractionOf(it);
           return {
             DOI: String(it.DOI || ''),
             Title: Array.isArray(it.title) ? (it.title[0] || '') : (it.title || ''),
             Authors: Array.isArray(it.author) ? it.author.map(a => [a.given, a.family].filter(Boolean).join(' ')).filter(Boolean).join('; ') : '',
             Journal: Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || ''),
             Year: (dp && dp[0]) || (dpAlt && dpAlt[0]) || (dpOn && dpOn[0]) || '',
+            Retracted: ret ? 'Yes' : 'No',
+            'Retraction type': ret ? String(ret.label || ret.type || '') : '',
+            'Retraction date': ret ? noticeDate(ret) : '',
+            'Retraction notice DOI': ret ? String(ret.DOI || '') : '',
             Source: 'Crossref'
           };
         });
