@@ -802,16 +802,51 @@
 
     // BibTeX: @article entries; retracted papers MUST carry a RETRACTED note
     // so anyone importing into Zotero/Mendeley sees the retraction immediately.
-    function bibKey(r, i) {
-      const t = String(r.title || r.Title || "item").split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "");
+    // Family name of the first author: "Given Family" -> Family, "Family, Given" -> Family.
+    function bibFamilyName(authors) {
+      let first = authors;
+      if (Array.isArray(first)) first = first.length ? first[0] : "";
+      if (first && typeof first === "object") first = first.name || first.author_name || "";
+      first = String(first == null ? "" : first).split(";")[0].trim();
+      if (!first) return "";
+      const family = first.indexOf(",") >= 0
+        ? first.slice(0, first.indexOf(","))
+        : first.split(/\s+/).pop();
+      return String(family).replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+    }
+
+    // First title word that is not a leading article.
+    function bibTitleWord(title) {
+      const words = String(title == null ? "" : title).split(/\s+/)
+        .map(w => w.replace(/[^A-Za-z0-9]/g, "")).filter(Boolean);
+      if (!words.length) return "";
+      if (words.length > 1 && /^(the|a|an)$/i.test(words[0])) return words[1].toLowerCase();
+      return words[0].toLowerCase();
+    }
+
+    // Author-year key (kulkarni2016); a letter suffix is added only on a real collision.
+    function bibKey(r, seen) {
+      const stem = bibFamilyName(r.authors || r.Authors || r.author || "")
+        || bibTitleWord(r.title || r.Title || r.display_name || "")
+        || "ref";
       const y = Number(r.year || r.Year || r.publication_year || 0) || "";
-      return (t || "ref").toLowerCase() + (y || "") + "_" + (i + 1);
+      const base = stem + (y || "");
+      if (!seen) return base;
+      let key = base, n = seen.get(base) || 0;
+      while (seen.has(key)) {
+        n += 1;
+        key = base + (n < 26 ? String.fromCharCode(97 + n) : "z" + (n - 24));
+      }
+      seen.set(base, n);
+      seen.set(key, 0);
+      return key;
     }
     function bibEsc(v) { return String(v == null ? "" : v).replace(/[{}\\]/g, "").trim(); }
 
     function toBibTeX(rows) {
       const out = [];
-      rows.forEach((r, i) => {
+      const seen = new Map();
+      rows.forEach(r => {
         const title = bibEsc(r.title || r.Title || r.display_name || "");
         if (!title) return;
         const doi = String(r.doi || r.DOI || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
@@ -823,7 +858,7 @@
         } else {
           authors = bibEsc(authors).replace(/;\s*/g, " and ");
         }
-        const lines = ["@article{" + bibKey(r, i) + ","];
+        const lines = ["@article{" + bibKey(r, seen) + ","];
         lines.push("  title   = {" + title + "},");
         if (authors) lines.push("  author  = {" + authors + "},");
         if (journal) lines.push("  journal = {" + journal + "},");
