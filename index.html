@@ -597,6 +597,21 @@
       return esc(d);
     }
 
+    // One year representation for every exported row: a real number when the
+    // year is known, null when it is not. Three call sites used to build this
+    // field independently and drifted into mixed string/number output, which
+    // breaks typed JSON consumers and sorts wrongly in Excel.
+    // Accepts a number, "2019", or a date-like "2019-04-11"; anything empty,
+    // unparseable or outside a plausible range becomes null.
+    function toYear(v) {
+      if (v === null || v === undefined) return null;
+      const m = String(v).trim().match(/^\d{4}/);
+      if (!m) return null;
+      const y = Number(m[0]);
+      if (y < 1500 || y > new Date().getFullYear() + 5) return null;
+      return y;
+    }
+
     // --- EXPORT SUITE (CSV / Excel / BibTeX / JSON) -------------------------
     // Global store: each module keeps its last raw result for the download buttons.
     const lastData = { check: null, search: null, superseded: null };
@@ -1048,7 +1063,7 @@
         lastData.check = [{
           DOI: d.doi || doi,
           Title: d.title || '',
-          Year: (String(d.published || '').match(/^\d{4}/) || [''])[0],
+          Year: toYear(d.published),
           Retracted: d.retracted ? 'Yes' : 'No',
           'Retraction type': d.retracted ? (d.update_type || '') : '',
           Published: d.published || '',
@@ -1115,7 +1130,7 @@
             Title: Array.isArray(it.title) ? (it.title[0] || '') : (it.title || ''),
             Authors: Array.isArray(it.author) ? it.author.map(a => [a.given, a.family].filter(Boolean).join(' ')).filter(Boolean).join('; ') : '',
             Journal: Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || ''),
-            Year: (dp && dp[0]) || (dpAlt && dpAlt[0]) || (dpOn && dpOn[0]) || '',
+            Year: toYear((dp && dp[0]) ?? (dpAlt && dpAlt[0]) ?? (dpOn && dpOn[0])),
             Retracted: ret ? 'Yes' : 'No',
             'Retraction type': ret ? String(ret.label || ret.type || '') : '',
             'Retraction date': ret ? noticeDate(ret) : '',
@@ -1170,7 +1185,7 @@
         lastData.superseded = rel.map(r => ({
           DOI: String(r.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, ''),
           Title: r.title || '',
-          Year: r.publication_year || '',
+          Year: toYear(r.publication_year),
           Citations: r.cited_by_count || 0,
           Source: 'OpenAlex'
         }));
@@ -1188,7 +1203,7 @@
                         '<div class="bar-chart" style="width:' + pct + '%"></div></div>';
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
                  '<td>' + esc(r.title || '(untitled)') + '<br><small>' + doiLink(r.doi) + '</small></td>' +
-                 '<td>' + esc(r.publication_year || '—') + '</td>' +
+                 '<td>' + esc(toYear(r.publication_year) || '—') + '</td>' +
                  '<td>' + bar + '</td></tr>';
           });
           h += '</table></div>';
