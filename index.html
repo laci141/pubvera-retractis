@@ -17,6 +17,15 @@
       line-height: 1.6;
       min-height: 100vh;
       position: relative;
+      /* Clearance for the fixed .brand-bar, derived from the bar's own rules so
+         it tracks the bar in rem rather than freezing one measured pixel
+         height — the bar grows with the root font size, and a px constant here
+         would let the content slide under it on a large-text browser.
+         The terms: 0.5rem padding top and bottom, the tallest child, and the
+         1px hairline. The tallest child is .brand-word's line box
+         (0.95rem font x 1.6 line-height = 1.52rem); the 22px mark only wins
+         below a ~14.5px root, which is what max() is for. */
+      padding-top: calc(1rem + max(1.52rem, 22px) + 1px);
     }
     /* Colored/patterned background BEHIND the glass panels so blur is visible */
     body::before {
@@ -41,30 +50,36 @@
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
 
-    /* BRAND BAR — Pubvera mark + wordmark, links back to the hub. The SVG is
-       inlined rather than linked from pubvera.com so the app does not depend
-       on Cloudflare Pages being up, and so the mark can inherit currentColor. */
+    /* BRAND BAR — the fixed full-width top bar: Pubvera on the left, the auth
+       controls on the right. The SVG is inlined rather than linked from
+       pubvera.com so the app does not depend on Cloudflare Pages being up, and
+       so the mark can inherit currentColor. */
     .brand-bar {
       position: fixed;
-      top: 1rem;
-      left: 1rem;
+      top: 0;
+      left: 0;
+      right: 0;
       z-index: 900;
       display: flex;
       align-items: center;
       gap: 0.45rem;
-      padding: 0.5rem 0.9rem;
+      padding: 0.5rem 1rem;
       background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 999px;
+      /* A hairline under the bar, not a border all the way round: the bar spans
+         the viewport, so its side and top edges have nothing to sit against. */
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
       backdrop-filter: blur(15px);
       -webkit-backdrop-filter: blur(15px);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-      text-decoration: none;
-      transition: border-color 0.2s, transform 0.2s;
     }
-    .brand-bar:hover {
-      border-color: rgba(0, 212, 255, 0.5);
-      transform: translateY(-1px);
+    /* Only the mark and the wordmark link to the hub — the auth controls share
+       the bar but are not part of the link. */
+    .brand-link {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      text-decoration: none;
+      flex-shrink: 0;
     }
     .brand-mark { color: #60a5fa; flex-shrink: 0; }
     .brand-word {
@@ -72,33 +87,21 @@
       font-weight: 700;
       color: #e8eef7;
       letter-spacing: -0.01em;
+      transition: color 0.2s;
     }
+    .brand-link:hover .brand-word { color: #00d4ff; }
 
-    /* AUTH BAR (Google sign-in) — .brand-bar here is a FIXED corner pill, so the
-       auth controls mirror it in the opposite corner with the same glass recipe
-       and the two read as one pair. Hidden until /config.json returns a Supabase
+    /* AUTH BAR (Google sign-in) — sits at the right end of the brand bar, pushed
+       over by the auto margin. Hidden until /config.json returns a Supabase
        config. */
     .auth-bar {
-      position: fixed;
-      top: 1rem;
-      right: 1rem;
-      z-index: 900;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      padding: 0.4rem 0.7rem;
-      /* Leaves room for .brand-bar (~130px) plus both insets and a gap, so a long
-         email truncates instead of sliding under the mark on a narrow screen.
-         Percent, not vw: for a fixed element 100% is the layout viewport, while
-         100vw also counts the scrollbar — and that difference is exactly the
-         width by which the two bars would have overlapped. */
-      max-width: calc(100% - 170px);
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 999px;
-      backdrop-filter: blur(15px);
-      -webkit-backdrop-filter: blur(15px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      margin-left: auto;
+      /* Without this the group refuses to shrink past its content and the email
+         inside it never gets the chance to ellipsis. */
+      min-width: 0;
     }
     /* display:flex above would otherwise defeat the hidden attribute. */
     .auth-bar[hidden] { display: none; }
@@ -122,8 +125,8 @@
       border-radius: 999px;
       font-size: 0.75rem;
       font-weight: 600;
-      /* Pinned: a button's default line box makes the pill taller than the text
-         needs, and the bar has to stay shorter than the hero's top padding. */
+      /* Pinned: a button's default line box would otherwise make these the
+         tallest thing in the bar and drive its whole height up. */
       line-height: 1;
       cursor: pointer;
       transition: all 0.2s ease;
@@ -154,7 +157,12 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      padding: 5rem 2rem 2rem;
+      /* The top padding used to be clearance for the floating brand pill. The
+         bar now reserves that space on body, and the two stacked: measured
+         115px from the bar to the title at a 16px root, a full bar height of it
+         duplicated. Trimmed by 2.5rem, leaving ~95px. What is left is breathing
+         room, not clearance — the hero still centres itself in 55vh. */
+      padding: 2.5rem 2rem 2rem;
       text-align: center;
     }
     .hero h1 {
@@ -414,27 +422,21 @@
     @media (max-width: 768px) {
       .hero h1 { font-size: 2.1rem; }
       .hero p { font-size: 1rem; }
-      .hero { padding-top: 4.5rem; }
+      /* Same derivation with this breakpoint's numbers: 0.35rem padding top and
+         bottom, .brand-word at 0.82rem x 1.6 = 1.312rem, the 1px hairline. Here
+         the 22px mark is the taller term at a 16px root and the wordmark takes
+         over above ~16.8px, so the max() decides it rather than a constant. */
+      body { padding-top: calc(0.7rem + max(1.312rem, 22px) + 1px); }
+      .hero { padding-top: 2.25rem; }
       .brand-bar {
-        top: 0.5rem;
-        left: 0.5rem;
-        padding: 0.35rem 0.5rem;
+        padding: 0.35rem 0.6rem;
         backdrop-filter: blur(11px);
         -webkit-backdrop-filter: blur(11px);
       }
       .brand-word { font-size: 0.82rem; }
-      /* The two bars share the top row on a phone, so the auth bar shrinks in
-         step with the brand bar and the email is allowed less width — the row
-         has to fit beside the mark without pushing the page sideways. */
-      .auth-bar {
-        top: 0.5rem;
-        right: 0.5rem;
-        gap: 0.35rem;
-        padding: 0.3rem 0.5rem;
-        max-width: calc(100% - 140px);
-        backdrop-filter: blur(11px);
-        -webkit-backdrop-filter: blur(11px);
-      }
+      /* Tighter spacing on a phone, and the email below is allowed less width,
+         so the controls still fit beside the mark on one row. */
+      .auth-bar { gap: 0.35rem; }
       .auth-email { font-size: 0.7rem; max-width: 30vw; }
       .auth-btn { font-size: 0.7rem; padding: 0.25rem 0.6rem; }
       .bento-grid { grid-template-columns: 1fr; padding: 1.25rem; }
@@ -451,7 +453,8 @@
 </head>
 <body>
 
-  <a class="brand-bar" href="https://pubvera.com" aria-label="Pubvera — back to all tools">
+  <header class="brand-bar">
+  <a class="brand-link" href="https://pubvera.com" aria-label="Pubvera — back to all tools">
     <svg class="brand-mark" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true" focusable="false">
       <g fill="currentColor">
         <rect x="6.0" y="11.0" width="42.0" height="8.1" rx="3.7"/>
@@ -474,6 +477,7 @@
     <button type="button" class="auth-btn auth-btn-primary" id="authSignInBtn" hidden>Sign in with Google</button>
     <button type="button" class="auth-btn" id="authSignOutBtn" hidden>Sign out</button>
   </div>
+  </header>
 
   <!-- HERO -->
   <section class="hero">
