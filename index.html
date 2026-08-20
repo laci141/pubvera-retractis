@@ -353,6 +353,10 @@
     }
     .dl:hover { background: rgba(255,255,255,0.15); border-color: var(--color, #00d4ff); color: #fff; }
     .dl-group { display: flex; gap: 8px; flex-shrink: 0; align-items: center; flex-wrap: wrap; }
+    /* House layout without a filter field: BibTeX + Excel on row 1, CSV + JSON
+       on row 2 — never all four on one row, mobile or desktop. */
+    .dl-group.no-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px; max-width: 100%; }
+    .dl-group.no-filter .dl { width: 100%; }
     .qfilter {
       background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.16); border-radius: 999px;
       padding: 4px 14px; color: #e8eef7; font-size: 0.78rem; width: 170px;
@@ -905,7 +909,12 @@
       const rows = exportRows(key).rows;
       if (!rows.length) { alert(EMPTY_EXPORT_MSG); return; }
       const papers = rows.filter(r => r && (r.title || r.Title || r.display_name));
-      const text = "% " + exportHeader(key, rows) + "\n\n" +
+      // The superseded analysis carries no author names (OpenAlex cannot select
+      // them without the whole authorships object), so disclose the gap here.
+      const bibNote = key === "superseded"
+        ? "% Author names are not available for this analysis. Use the DOI to fetch full metadata in your reference manager.\n"
+        : "";
+      const text = "% " + exportHeader(key, rows) + "\n" + bibNote + "\n" +
         (papers.length ? toBibTeX(papers) : analysisBibTeX(key, rows));
       triggerDownload(new Blob([text], { type: "application/x-bibtex;charset=utf-8" }), filename);
     }
@@ -927,6 +936,10 @@
         },
         rows: view.rows
       };
+      // Same disclosure as the BibTeX export, for typed consumers.
+      if (key === "superseded") {
+        payload.export.note = "Author names are not available for this analysis. Use the DOI to fetch full metadata in your reference manager.";
+      }
       triggerDownload(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), filename);
     }
 
@@ -940,14 +953,17 @@
     }
 
     // Result header: count + quick filter + download buttons, one helper for all modules.
-    function metaRow(text, key, filename) {
+    // opts.filter === false drops the quick-filter box (a single-record view has
+    // no table to filter); the buttons then use the house two-row grid.
+    function metaRow(text, key, filename, opts) {
+      const withFilter = !(opts && opts.filter === false);
       const csvName = String(filename).replace(/\.json$/i, ".csv");
       const xlsxName = String(filename).replace(/\.json$/i, ".xlsx");
       const bibName = String(filename).replace(/\.json$/i, ".bib");
       const bibTitle = "BibTeX citations — retracted papers are flagged in the note field";
       return '<div class="meta-row"><span class="meta">' + text + '<span class="qcount"></span></span>' +
-        '<span class="dl-group">' +
-        '<input class="qfilter" type="text" placeholder="🔍 Filter results…">' +
+        '<span class="dl-group' + (withFilter ? '' : ' no-filter') + '">' +
+        (withFilter ? '<input class="qfilter" type="text" placeholder="🔍 Filter results…">' : '') +
         '<button class="dl" title="' + bibTitle + '" onclick="downloadBibTeX(\'' + key + '\',\'' + bibName + '\')">⬇ BibTeX</button>' +
         '<button class="dl" onclick="downloadXLSX(\'' + key + '\',\'' + xlsxName + '\')">⬇ Excel</button>' +
         '<button class="dl" onclick="downloadCSV(\'' + key + '\',\'' + csvName + '\')">⬇ CSV</button>' +
@@ -1109,7 +1125,7 @@
           Signals: Array.isArray(d.signals) ? d.signals.join('; ') : '',
           Source: 'Crossref'
         }];
-        let h = metaRow('1 record checked', 'check', 'retractis-check.json');
+        let h = metaRow('1 record checked', 'check', 'retractis-check.json', { filter: false });
         if (d.retracted) {
           h += '<div class="badge bad">⚠ RETRACTED</div>';
         } else {
@@ -1232,6 +1248,7 @@
           h += '<div class="error-box">No related newer works found.</div>';
         } else {
           h += metaRow(rel.length + ' related works' + (d.from_year ? ' since ' + esc(d.from_year) : ''), 'superseded', 'retractis-superseded.json');
+          h += '<p class="meta no-authors-note">Author names are not available for this analysis — use the DOI in your reference manager.</p>';
           // Scale citation bars to the max cited_by_count (min 1 to avoid /0).
           const maxCited = Math.max(1, ...rel.map(r => r.cited_by_count || 0));
           h += '<div class="table-wrap"><table><tr><th>#</th><th>Related work</th><th>Year</th><th>Citations</th></tr>';
