@@ -1135,6 +1135,8 @@
           Year: toYear(d.published),
           Retracted: d.retracted ? 'Yes' : 'No',
           'Retraction type': d.retracted ? (d.update_type || '') : '',
+          'Retraction date': d.retracted ? (d.date || '') : '',
+          'Retraction notice DOI': d.retracted ? (d.notice_doi || '') : '',
           Published: d.published || '',
           Signals: Array.isArray(d.signals) ? d.signals.join('; ') : '',
           Source: 'Crossref'
@@ -1150,6 +1152,7 @@
         const meta = [];
         if (d.retracted && d.update_type) meta.push('Type: ' + esc(d.update_type));
         if (d.published) meta.push('Published: ' + esc(d.published));
+        if (d.retracted && d.date) meta.push('Retraction: ' + esc(d.date));
         if (meta.length) h += '<p class="meta-line">' + meta.join(' · ') + '</p>';
         if (d.retracted && Array.isArray(d.signals) && d.signals.length) {
           h += '<p>' + d.signals.map(s => '<span class="pill">' + esc(s) + '</span>').join('') + '</p>';
@@ -1187,6 +1190,13 @@
           return ups.filter(u => u && /retract|withdraw|removal/i.test(String(u.type || u.label || '')))
                     .sort((a, b) => noticeDate(b).localeCompare(noticeDate(a)))[0] || null;
         };
+        // Crossref returns the literal "&NA;" as an author name in some legacy
+        // records. It carries no information, so drop it here, where the name is
+        // assembled, rather than at every place the Authors field is consumed.
+        const authorName = a => {
+          const name = [a.given, a.family].filter(Boolean).join(' ').trim();
+          return name === '&NA;' ? '' : name;
+        };
         // Flatten Crossref items into export-friendly rows (client-side only —
         // authors and journal are already present in the same API response).
         const rows = items.map(it => {
@@ -1197,7 +1207,7 @@
           return {
             DOI: String(it.DOI || ''),
             Title: Array.isArray(it.title) ? (it.title[0] || '') : (it.title || ''),
-            Authors: Array.isArray(it.author) ? it.author.map(a => [a.given, a.family].filter(Boolean).join(' ')).filter(Boolean).join('; ') : '',
+            Authors: Array.isArray(it.author) ? it.author.map(authorName).filter(Boolean).join('; ') : '',
             Journal: Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || ''),
             Year: toYear((dp && dp[0]) ?? (dpAlt && dpAlt[0]) ?? (dpOn && dpOn[0])),
             Retracted: ret ? 'Yes' : 'No',
