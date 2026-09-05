@@ -21,19 +21,29 @@ func main() {
 	if port == "" {
 		port = "8092"
 	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/check", handleCheck)
 	mux.HandleFunc("/api/search", handleSearch)
 	mux.HandleFunc("/api/superseded", handleSuperseded)
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/", handleRoot)
+
 	srv := &http.Server{
 		Addr:              "0.0.0.0:" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s, timeout=%s, slots=%d)",
-		port, cliBinary(), cliRunTimeout, cliSem.capacity())
+
+	// The mailto value is logged as present/absent only. It is not a secret,
+	// but echoing a contact address into every startup line serves no purpose.
+	politeState := "off"
+	if crossrefMailto() != "" {
+		politeState = "on"
+	}
+	log.Printf("pubvera-retractis listening on 0.0.0.0:%s (CLI=%s, timeout=%s, slots=%d, crossref_polite=%s)",
+		port, cliBinary(), cliRunTimeout, cliSem.capacity(), politeState)
+
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
@@ -90,6 +100,20 @@ func cliBinary() string {
 	return "./retraction-checker"
 }
 
+// crossrefMailto returns the contact address for the Crossref polite pool, or
+// an empty string when unset. Crossref serves polite-pool callers from a
+// separate bucket: measured against api.crossref.org, an anonymous request
+// reports x-rate-limit-limit: 5 per second and a request carrying mailto
+// reports 10. Halving the wall time of a large scan is the practical effect.
+//
+// The address is not a secret — it travels in the query string of every
+// Crossref call by design, so that Crossref can reach the operator about
+// traffic problems. Unset is a supported state: the CLI simply omits the flag
+// and falls back to the anonymous pool.
+func crossrefMailto() string {
+	return strings.TrimSpace(os.Getenv("CROSSREF_MAILTO"))
+}
+
 // cliCmdLabel names the subcommand for the log without leaking user input.
 // Flags and their values are dropped, so a DOI or a search query never
 // reaches the log; only the leading verbs survive ("check", "works search").
@@ -142,6 +166,14 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, cliRunTimeout)
 	defer cancel()
 
+	// Appended last, after every caller-supplied argument. cliCmdLabel stops at
+	// the first flag, so a trailing --mailto cannot disturb the log label; put
+	// in front, it would reduce every label to "?". Every subcommand this app
+	// invokes (check, works search, superseded) accepts the flag.
+	if m := crossrefMailto(); m != "" {
+		args = append(args, "--mailto", m)
+	}
+
 	bin := cliBinary()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	var stdout, stderr bytes.Buffer
@@ -183,6 +215,7 @@ func writeRaw(w http.ResponseWriter, b []byte) {
 }
 
 // ------ API: /api/check ------
+
 type checkRequest struct {
 	DOI string `json:"doi"`
 }
@@ -212,6 +245,7 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // ------ API: /api/search ------
+
 type searchRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit,omitempty"`
@@ -248,6 +282,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // ------ API: /api/superseded ------
+
 type supersededRequest struct {
 	DOI   string `json:"doi"`
 	Limit int    `json:"limit,omitempty"`
