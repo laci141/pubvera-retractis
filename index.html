@@ -1214,6 +1214,35 @@
       el.innerHTML = errorHTML(err);
     }
 
+    // Turns a CLI signal slug into something readable on the badge.
+    //
+    // The CLI builds these in retraction.go: line 217 appends
+    // "crossref-update:" + u.Type, and line 226 appends "title-prefix". The
+    // first is a concatenation, not a fixed string — u.Type is Crossref's own
+    // update type, of which there are dozens (correction, corrigendum, erratum,
+    // withdrawal, expression_of_concern, new_edition, partial_retraction…). A
+    // lookup table keyed on the whole slug would cover the one value seen so
+    // far and leave every other update type raw, which is the defect being
+    // fixed, only rarer and harder to notice.
+    //
+    // So the prefix is translated and the type is carried through with its
+    // underscores and hyphens opened out. An unrecognised slug is returned as
+    // it is rather than mangled: showing a slug beats showing a wrong name.
+    //
+    // Display only. The exports keep the raw slugs — those are the CLI's stable
+    // vocabulary and a script filtering on "crossref-update:retraction" should
+    // not have to track wording changes here.
+    function signalLabel(sig) {
+      const s = String(sig == null ? '' : sig).trim();
+      if (!s) return '';
+      if (s === 'title-prefix') return 'RETRACTED in title';
+      if (s.indexOf('crossref-update:') === 0) {
+        const type = s.slice('crossref-update:'.length).replace(/[_-]+/g, ' ').trim();
+        return type ? 'Crossref notice: ' + type : 'Crossref notice';
+      }
+      return s;
+    }
+
     // --- CHECK --------------------------------------------------------------
     async function runCheck() {
       const doi = document.getElementById('check-doi').value.trim();
@@ -1251,7 +1280,11 @@
         if (d.retracted && d.date) meta.push('Retraction: ' + esc(d.date));
         if (meta.length) h += '<p class="meta-line">' + meta.join(' · ') + '</p>';
         if (d.retracted && Array.isArray(d.signals) && d.signals.length) {
-          h += '<p>' + d.signals.map(s => '<span class="pill">' + esc(s) + '</span>').join('') + '</p>';
+          // The raw slug stays reachable in the tooltip: it is what the exports
+          // and the CLI use, so anyone matching the two up needs to see it.
+          h += '<p>' + d.signals.map(s =>
+            '<span class="pill" title="' + esc(s) + '">' + esc(signalLabel(s)) + '</span>'
+          ).join('') + '</p>';
         }
         out.innerHTML = h;
       } catch (err) { showError(out, err); }
