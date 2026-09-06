@@ -593,6 +593,34 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+
+    // Inverse of esc(), for text that arrives ALREADY HTML-encoded from the
+    // upstream API. Crossref stores publisher-supplied titles as marked-up
+    // strings, so "Journal of Diabetes & Metabolism" comes back over the wire as
+    // "Journal of Diabetes &amp; Metabolism". Rendering that with esc() alone
+    // double-encodes it and the reader sees the raw entity; writing it to CSV,
+    // XLSX, BibTeX or JSON puts the entity in the file itself.
+    //
+    // The decode uses a detached <textarea>: assigning to .innerHTML on a
+    // textarea parses character references but NOT elements, so "<img onerror=…>"
+    // stays inert text rather than becoming a node. The element is never inserted
+    // into the document. Every consumer still passes the result through esc()
+    // before it reaches innerHTML, so the XSS boundary is unchanged — this only
+    // removes an encoding layer that the API added.
+    //
+    // Named decodeEntities, not unescape: window.unescape is a built-in
+    // (typeof unescape === "function" in every browser) and shadowing it at
+    // global scope would break any library that reaches for the original.
+    const entityDecoder = document.createElement('textarea');
+    function decodeEntities(s) {
+      const raw = String(s == null ? '' : s);
+      // Fast path: no "&" means there is nothing to decode, and this skips the
+      // DOM round-trip for the overwhelming majority of values.
+      if (raw.indexOf('&') === -1) return raw;
+      entityDecoder.innerHTML = raw;
+      return entityDecoder.value;
+    }
+
     // Normalize a DOI value (may arrive as "https://doi.org/10.x/..." from
     // OpenAlex) and return a safe doi.org link, or escaped plain text if the
     // DOI doesn't look valid.
@@ -849,21 +877,26 @@
       seen.set(key, 0);
       return key;
     }
-    function bibEsc(v) { 
-  return String(v == null ? "" : v)
-    .normalize("NFC")
-    .replace(/[{}\\]/g, "")
-    .replace(/([&%#_$])/g, "\\$1")
-    .replace(/\^/g, "\\textasciicircum{}")
-    .replace(/~/g, "\\textasciitilde{}")
-    .replace(/α/g, "\\ensuremath{\\alpha}")
-    .replace(/β/g, "\\ensuremath{\\beta}")
-    .replace(/γ/g, "\\ensuremath{\\gamma}")
-    .replace(/δ/g, "\\ensuremath{\\delta}")
-    .replace(/μ/g, "\\ensuremath{\\mu}")
-    .replace(/Δ/g, "\\ensuremath{\\Delta}")
-    .trim();
-}
+    // Rows now enter already entity-decoded (see decodeEntities at the API
+    // boundary), so a "&" reaching here is a real ampersand and gets the LaTeX
+    // backslash. Decoding after this escape would have undone it: "\&amp;" is
+    // what the previous exports wrote into the .bib file, and biber read it as
+    // an escaped ampersand followed by the literal text "amp;".
+    function bibEsc(v) {
+      return String(v == null ? "" : v)
+        .normalize("NFC")
+        .replace(/[{}\\]/g, "")
+        .replace(/([&%#_$])/g, "\\$1")
+        .replace(/\^/g, "\\textasciicircum{}")
+        .replace(/~/g, "\\textasciitilde{}")
+        .replace(/α/g, "\\ensuremath{\\alpha}")
+        .replace(/β/g, "\\ensuremath{\\beta}")
+        .replace(/γ/g, "\\ensuremath{\\gamma}")
+        .replace(/δ/g, "\\ensuremath{\\delta}")
+        .replace(/μ/g, "\\ensuremath{\\mu}")
+        .replace(/Δ/g, "\\ensuremath{\\Delta}")
+        .trim();
+    }
 
     function toBibTeX(rows) {
       const out = [];
@@ -1129,9 +1162,12 @@
       lastQuery.check = doi;
       try {
         const d = await callApi('/api/check', { doi }, out, document.getElementById('check-btn'));
+        // Decoded once, here at the API boundary, then used by both the screen
+        // and every export — so the two can never disagree about the text.
+        const title = decodeEntities(d.title || '');
         lastData.check = [{
           DOI: d.doi || doi,
-          Title: d.title || '',
+          Title: title,
           Year: toYear(d.published),
           Retracted: d.retracted ? 'Yes' : 'No',
           'Retraction type': d.retracted ? (d.update_type || '') : '',
@@ -1147,7 +1183,7 @@
         } else {
           h += '<div class="badge ok">✓ Not retracted</div>';
         }
-        h += '<p class="paper-title">' + esc(d.title || '(no title returned)') + '</p>';
+        h += '<p class="paper-title">' + esc(title || '(no title returned)') + '</p>';
         h += '<p class="paper-doi">' + doiLink(d.doi || doi) + '</p>';
         const meta = [];
         if (d.retracted && d.update_type) meta.push('Type: ' + esc(d.update_type));
@@ -1193,12 +1229,18 @@
         // Crossref returns the literal "&NA;" as an author name in some legacy
         // records. It carries no information, so drop it here, where the name is
         // assembled, rather than at every place the Authors field is consumed.
+        // The check runs on the decoded name: "&NA;" is itself entity-shaped, and
+        // decodeEntities leaves it untouched only because "&NA;" is not a defined
+        // character reference — so the comparison must not be reordered.
         const authorName = a => {
-          const name = [a.given, a.family].filter(Boolean).join(' ').trim();
+          const name = decodeEntities([a.given, a.family].filter(Boolean).join(' ').trim());
           return name === '&NA;' ? '' : name;
         };
         // Flatten Crossref items into export-friendly rows (client-side only —
         // authors and journal are already present in the same API response).
+        // Every free-text field is decoded here, at the boundary: Crossref sends
+        // publisher-supplied markup, so titles and journal names arrive with
+        // "&amp;" and friends still encoded.
         const rows = items.map(it => {
           const dp = it.published && it.published['date-parts'] && it.published['date-parts'][0];
           const dpAlt = it['published-print'] && it['published-print']['date-parts'] && it['published-print']['date-parts'][0];
@@ -1206,12 +1248,12 @@
           const ret = retractionOf(it);
           return {
             DOI: String(it.DOI || ''),
-            Title: Array.isArray(it.title) ? (it.title[0] || '') : (it.title || ''),
+            Title: decodeEntities(Array.isArray(it.title) ? (it.title[0] || '') : (it.title || '')),
             Authors: Array.isArray(it.author) ? it.author.map(authorName).filter(Boolean).join('; ') : '',
-            Journal: Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || ''),
+            Journal: decodeEntities(Array.isArray(it['container-title']) ? (it['container-title'][0] || '') : (it['container-title'] || '')),
             Year: toYear((dp && dp[0]) ?? (dpAlt && dpAlt[0]) ?? (dpOn && dpOn[0])),
             Retracted: ret ? 'Yes' : 'No',
-            'Retraction type': ret ? String(ret.label || ret.type || '') : '',
+            'Retraction type': ret ? decodeEntities(String(ret.label || ret.type || '')) : '',
             'Retraction date': ret ? noticeDate(ret) : '',
             'Retraction notice DOI': ret ? String(ret.DOI || '') : '',
             Source: 'Crossref'
@@ -1247,7 +1289,10 @@
       lastQuery.superseded = doi;
       try {
         const d = await callApi('/api/superseded', { doi, limit }, out, document.getElementById('superseded-btn'));
-        let h = '<p class="paper-title">' + esc(d.title || '(no title)') + '</p>';
+        // OpenAlex reconstructs titles from an inverted index and passes the
+        // publisher's markup through, so the same decode applies here.
+        const headTitle = decodeEntities(d.title || '');
+        let h = '<p class="paper-title">' + esc(headTitle || '(no title)') + '</p>';
         h += '<p class="meta-line">' +
              (d.retracted ? '<span class="badge bad" style="font-size:0.85rem;padding:0.2rem 0.7rem">⚠ RETRACTED</span>'
                           : '<span class="badge ok" style="font-size:0.85rem;padding:0.2rem 0.7rem">✓ Not retracted</span>') +
@@ -1263,7 +1308,7 @@
           .filter(r => normDoi(r.doi) !== selfDoi);
         lastData.superseded = rel.map(r => ({
           DOI: String(r.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, ''),
-          Title: r.title || '',
+          Title: decodeEntities(r.title || ''),
           Year: toYear(r.publication_year),
           Citations: r.cited_by_count || 0,
           Source: 'OpenAlex'
@@ -1282,7 +1327,7 @@
             const bar = '<div class="bar-container"><span class="bar-number">' + cited.toLocaleString() + '</span>' +
                         '<div class="bar-chart" style="width:' + pct + '%"></div></div>';
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
-                 '<td>' + esc(r.title || '(untitled)') + '<br><small>' + doiLink(r.doi) + '</small></td>' +
+                 '<td>' + esc(decodeEntities(r.title || '') || '(untitled)') + '<br><small>' + doiLink(r.doi) + '</small></td>' +
                  '<td>' + esc(toYear(r.publication_year) || '—') + '</td>' +
                  '<td>' + bar + '</td></tr>';
           });
