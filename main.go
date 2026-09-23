@@ -43,7 +43,7 @@ const (
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8092"
+		port = "8093" // retractis port: matches Dockerfile EXPOSE and compose; 8092 is devicera
 	}
 
 	mux := http.NewServeMux()
