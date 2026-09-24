@@ -40,6 +40,7 @@ COPY --from=cli-builder /go/bin/retraction-checker-pp-cli ./retraction-checker
 RUN chmod +x ./server ./retraction-checker
 
 # The upstream commit the CLI was built from, readable with docker inspect.
+ARG PP_LIBRARY_COMMIT
 LABEL org.pubvera.cli.commit=${PP_LIBRARY_COMMIT}
 
 ENV CLI_BIN=/app/retraction-checker
