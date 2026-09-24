@@ -37,7 +37,6 @@ WORKDIR /app
 COPY --from=web-builder /out/server ./server
 COPY --from=web-builder /out/index.html ./index.html
 COPY --from=cli-builder /go/bin/retraction-checker-pp-cli ./retraction-checker
-COPY bin/retraction-checker-pp-cli-linux ./mutation-check
 RUN chmod +x ./server ./retraction-checker
 
 # The upstream commit the CLI was built from, readable with docker inspect.
