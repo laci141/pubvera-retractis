@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -44,6 +45,19 @@ const (
 // line. The CLI's usage text is about 25 lines; 2000 runes keeps all of it and
 // still bounds a runaway upstream error body. Same cap as pubvera-grantvera.
 const cliStderrLogMax = 2000
+
+// Request-body limits, checked before any CLI process is spawned. Every request
+// body is a small JSON object: { doi }, { query, limit } or { doi, limit }.
+//
+// maxBodyBytes bounds the body itself; it also bounds every text field inside
+// it, so no separate per-field length is set. maxResultLimit is the slider
+// maximum in index.html (max="25") for both the search and the superseded
+// limit. A larger value is rejected rather than clamped, so a caller learns
+// the request was not honoured. Same shape as pubvera-recallis ab047a2.
+const (
+	maxBodyBytes   = 64 << 10
+	maxResultLimit = 25
+)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -252,6 +266,61 @@ func writeRaw(w http.ResponseWriter, b []byte) {
 	w.Write(b)
 }
 
+// decodeJSONRequest decodes one JSON object from the request body into dst.
+// The body is capped at maxBodyBytes (413 above it), unknown fields are
+// rejected, and so is anything after the object. Before this, every handler
+// used a bare json.NewDecoder: no size limit, unknown fields and trailing data
+// accepted, and bad input reached the child CLI, held a CLI slot and came back
+// as 502 instead of 400.
+func decodeJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return false
+	}
+	if err := dec.Decode(new(struct{})); err != io.EOF {
+		http.Error(w, "invalid JSON: trailing data after the request object", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// validateTextArg trims a free-text field in place and rejects it when empty or
+// when it starts with '-'. The DOI is passed to the CLI as a positional
+// argument and the query as a flag value; either one starting with a dash
+// ("--help", "-json") could be read by the CLI's flag parser as a flag, still
+// spawn a process, hold a CLI slot, and come back as a 502.
+func validateTextArg(w http.ResponseWriter, name string, v *string) bool {
+	*v = strings.TrimSpace(*v)
+	if *v == "" {
+		http.Error(w, "missing "+name, http.StatusBadRequest)
+		return false
+	}
+	if strings.HasPrefix(*v, "-") {
+		http.Error(w, name+" must not start with '-'", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// checkCeiling rejects a numeric field above its ceiling with a 400 naming the
+// field. It runs before defaults are applied; 0 and negatives pass through to
+// the default so an empty slider (JSON null -> 0) keeps working.
+func checkCeiling(w http.ResponseWriter, name string, v, max int) bool {
+	if v > max {
+		http.Error(w, fmt.Sprintf("%s must be at most %d", name, max), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
 // ------ API: /api/check ------
 
 type checkRequest struct {
@@ -264,12 +333,10 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req checkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSONRequest(w, r, &req) {
 		return
 	}
-	if req.DOI == "" {
-		http.Error(w, "missing doi", http.StatusBadRequest)
+	if !validateTextArg(w, "doi", &req.DOI) {
 		return
 	}
 
@@ -295,12 +362,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req searchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSONRequest(w, r, &req) {
 		return
 	}
-	if req.Query == "" {
-		http.Error(w, "missing query", http.StatusBadRequest)
+	if !validateTextArg(w, "query", &req.Query) {
+		return
+	}
+	if !checkCeiling(w, "limit", req.Limit, maxResultLimit) {
 		return
 	}
 	if req.Limit <= 0 {
@@ -332,12 +400,13 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req supersededRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSONRequest(w, r, &req) {
 		return
 	}
-	if req.DOI == "" {
-		http.Error(w, "missing doi", http.StatusBadRequest)
+	if !validateTextArg(w, "doi", &req.DOI) {
+		return
+	}
+	if !checkCeiling(w, "limit", req.Limit, maxResultLimit) {
 		return
 	}
 	if req.Limit <= 0 {
