@@ -266,6 +266,22 @@ func writeRaw(w http.ResponseWriter, b []byte) {
 	w.Write(b)
 }
 
+// writeJSONError writes {"error": msg} with the given status. index.html reads
+// every error response as JSON and shows its "error" field; the plain text
+// http.Error used to write did not parse, so the page replaced the real reason
+// with "Server returned an unreadable response". The headers mirror what
+// http.Error sets: any stale Content-Length is dropped and nosniff is kept.
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	h := w.Header()
+	h.Del("Content-Length")
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(struct {
+		Error string `json:"error"`
+	}{msg})
+}
+
 // decodeJSONRequest decodes one JSON object from the request body into dst.
 // The body is capped at maxBodyBytes (413 above it), unknown fields are
 // rejected, and so is anything after the object. Before this, every handler
@@ -279,14 +295,14 @@ func decodeJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if err := dec.Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return false
 		}
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON")
 		return false
 	}
 	if err := dec.Decode(new(struct{})); err != io.EOF {
-		http.Error(w, "invalid JSON: trailing data after the request object", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON: trailing data after the request object")
 		return false
 	}
 	return true
@@ -300,11 +316,11 @@ func decodeJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 func validateTextArg(w http.ResponseWriter, name string, v *string) bool {
 	*v = strings.TrimSpace(*v)
 	if *v == "" {
-		http.Error(w, "missing "+name, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing "+name)
 		return false
 	}
 	if strings.HasPrefix(*v, "-") {
-		http.Error(w, name+" must not start with '-'", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, name+" must not start with '-'")
 		return false
 	}
 	return true
@@ -315,7 +331,7 @@ func validateTextArg(w http.ResponseWriter, name string, v *string) bool {
 // the default so an empty slider (JSON null -> 0) keeps working.
 func checkCeiling(w http.ResponseWriter, name string, v, max int) bool {
 	if v > max {
-		http.Error(w, fmt.Sprintf("%s must be at most %d", name, max), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("%s must be at most %d", name, max))
 		return false
 	}
 	return true
@@ -329,7 +345,7 @@ type checkRequest struct {
 
 func handleCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "only POST", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "only POST")
 		return
 	}
 	var req checkRequest
@@ -358,7 +374,7 @@ type searchRequest struct {
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "only POST", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "only POST")
 		return
 	}
 	var req searchRequest
@@ -396,7 +412,7 @@ type supersededRequest struct {
 
 func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "only POST", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "only POST")
 		return
 	}
 	var req supersededRequest

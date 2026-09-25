@@ -147,15 +147,16 @@ func (s *cliSemaphore) capacity() int {
 }
 
 // writeCLIError turns a runCLI failure into an HTTP response, separating "the
-// server is full" from "the CLI broke".
+// server is full" from "the CLI broke". Both are written as JSON errors, like
+// every other error this app returns (see writeJSONError).
 //
 // A 503 without a Retry-After is not actionable: a client that retries
 // immediately makes the overload it just hit worse.
 func writeCLIError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errCLIBusy) {
 		w.Header().Set("Retry-After", strconv.Itoa(cliSlotRetryAfter))
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	http.Error(w, err.Error(), http.StatusBadGateway)
+	writeJSONError(w, http.StatusBadGateway, err.Error())
 }
