@@ -40,6 +40,11 @@ const (
 	srvIdleTimeout = 120 * time.Second
 )
 
+// cliStderrLogMax caps how much of a failing child's stderr goes into one log
+// line. The CLI's usage text is about 25 lines; 2000 runes keeps all of it and
+// still bounds a runaway upstream error body. Same cap as pubvera-grantvera.
+const cliStderrLogMax = 2000
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -203,6 +208,12 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 
 	bin := cliBinary()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// stderr goes to the log, never to the client. The error returned below
+	// reaches the browser as the response body via writeCLIError, and what the
+	// CLI writes to stderr on failure is its own usage text, its version banner
+	// and raw upstream messages, none of it bounded. That is operator
+	// information: it belongs in the "cli: fail" log line, capped at
+	// cliStderrLogMax, not in an HTTP response.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -215,9 +226,9 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 				label, waitMS, elapsed)
 			return nil, fmt.Errorf("CLI stopped after %s: %v", cliRunTimeout, ctxErr)
 		}
-		log.Printf("cli: fail cmd=%s wait_ms=%d elapsed_ms=%d err=%v",
-			label, waitMS, elapsed, err)
-		return nil, fmt.Errorf("CLI error: %v — stderr: %s", err, stderr.String())
+		log.Printf("cli: fail cmd=%s wait_ms=%d elapsed_ms=%d err=%v stderr=%s",
+			label, waitMS, elapsed, err, truncate(strings.TrimSpace(stderr.String()), cliStderrLogMax))
+		return nil, fmt.Errorf("CLI error: %v", err)
 	}
 
 	// A successful run can still have written to stderr, and those messages are
