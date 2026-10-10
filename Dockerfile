@@ -32,7 +32,10 @@ COPY index.html /out/
 # rebuild with no code change could ship a different base system. 3.24 is the
 # same line grantvera, recallis and bibliovera run.
 FROM alpine:3.24
-RUN apk add --no-cache ca-certificates wget
+# The unprivileged user the server runs as (see USER below). UID 10001 is the
+# same as pubvera-bibliovera and pubvera-grantvera. adduser -D also creates
+# /home/app, which is where the CLI keeps its small HTTP cache.
+RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=web-builder /out/server ./server
 COPY --from=web-builder /out/index.html ./index.html
@@ -53,4 +56,9 @@ EXPOSE 8093
 # cannot disagree.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD wget -qO- "http://localhost:${PORT:-8093}/healthz" || exit 1
+# The server ran as root (UID 0, measured with docker top on 2026-10-10). The
+# container has no mounts; the only writes are the CLI's HTTP cache under the
+# home directory, which this user owns. CI checks the UID of PID 1 in the
+# running image.
+USER app
 CMD ["./server"]
