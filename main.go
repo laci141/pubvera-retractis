@@ -18,6 +18,11 @@ import (
 
 const cliRunTimeout = 120 * time.Second
 
+// version is the CalVer build version (YYYY.MM.DD.N). The release workflow
+// stamps it with -ldflags "-X main.version=..."; a local or pull request build
+// keeps "dev". GET /version reports it and the page footer shows it.
+var version = "dev"
+
 // Server-side timeouts. ReadHeaderTimeout was the only one set, which left the
 // request BODY with no deadline at all: a size limit is not a time limit, and a
 // client that sends its body one byte per minute holds a handler goroutine for
@@ -98,6 +103,7 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/api/superseded", handleSuperseded)
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz)
+	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/", handleRoot)
 	return mux
 }
@@ -147,6 +153,20 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+// handleVersion returns {"version":"<version>"}. no-store, so the footer never
+// shows the version of an image that has since been replaced.
+func handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSONError(w, http.StatusMethodNotAllowed, "only GET")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(struct {
+		Version string `json:"version"`
+	}{version})
 }
 
 // handleReadyz answers a different question from /healthz. /healthz says the
