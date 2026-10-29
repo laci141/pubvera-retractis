@@ -6,7 +6,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Retractis — check any DOI against known retractions and expressions of concern, and discover newer research that supersedes it. Powered by Crossref and OpenAlex open data. Free Google sign-in, no API keys needed.">
-  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" integrity="sha384-OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb" crossorigin="anonymous"></script>
+  <script nonce="__CSP_NONCE__" src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" integrity="sha384-OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb" crossorigin="anonymous"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -628,7 +628,7 @@
     <span id="app-version"></span>
   </footer>
 
-  <script>
+  <script nonce="__CSP_NONCE__">
     'use strict';
 
     // --- XSS-safe helpers ---------------------------------------------------
@@ -1644,7 +1644,7 @@
        until the environment variables are set — Supabase is never loaded at all
        and the page runs unauthenticated: no sign-in UI, no Authorization header,
        everything else unchanged. -->
-  <script type="module">
+  <script nonce="__CSP_NONCE__" type="module">
     const bar     = document.getElementById('authBar');
     const emailEl = document.getElementById('authEmail');
     const inBtn   = document.getElementById('authSignInBtn');
@@ -1733,7 +1733,7 @@
 
   <!-- Build version from /version (main.go). textContent only; on any failure
        the span stays empty. -->
-  <script>
+  <script nonce="__CSP_NONCE__">
     fetch('/version', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
