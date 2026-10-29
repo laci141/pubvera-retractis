@@ -25,7 +25,7 @@ WORKDIR /build
 # The CalVer version from the release workflow; "dev" for any other build.
 ARG APP_VERSION=dev
 COPY go.mod ./
-COPY main.go semaphore.go index.html ./
+COPY main.go semaphore.go csp.go index.html ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X main.version=${APP_VERSION}" -o /out/server .
 COPY index.html /out/
 
