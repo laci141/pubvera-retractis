@@ -531,25 +531,25 @@
     <h1>🔬 Retractis</h1>
     <p>Check any DOI against known retractions and expressions of concern, and discover newer research that supersedes it — powered by Crossref and OpenAlex open data. Sign in with Google — no API keys needed.</p>
     <div class="chips">
-      <button class="chip" onclick="openModal('check', '10.1016/S0140-6736(97)11096-0')">Wakefield 1998 (retracted)</button>
-      <button class="chip" onclick="openModal('search', 'CRISPR')">CRISPR</button>
-      <button class="chip" onclick="openModal('search', 'reproducibility crisis')">Reproducibility</button>
+      <button class="chip" data-action="open-modal" data-modal="check" data-arg="10.1016/S0140-6736(97)11096-0">Wakefield 1998 (retracted)</button>
+      <button class="chip" data-action="open-modal" data-modal="search" data-arg="CRISPR">CRISPR</button>
+      <button class="chip" data-action="open-modal" data-modal="search" data-arg="reproducibility crisis">Reproducibility</button>
     </div>
   </section>
 
   <!-- BENTO CARDS -->
   <section class="bento-grid">
-    <div class="bento-card glass-panel check" onclick="openModal('check')">
+    <div class="bento-card glass-panel check" data-action="open-modal" data-modal="check">
       <div class="bento-icon">✅</div>
       <div class="bento-label">Check a Paper</div>
       <div class="bento-desc">Paste a DOI and instantly see if the paper was retracted.</div>
     </div>
-    <div class="bento-card glass-panel search" onclick="openModal('search')">
+    <div class="bento-card glass-panel search" data-action="open-modal" data-modal="search">
       <div class="bento-icon">🔎</div>
       <div class="bento-label">Search Works</div>
       <div class="bento-desc">Search millions of papers by topic via Crossref.</div>
     </div>
-    <div class="bento-card glass-panel superseded" onclick="openModal('superseded')">
+    <div class="bento-card glass-panel superseded" data-action="open-modal" data-modal="superseded">
       <div class="bento-icon">🔁</div>
       <div class="bento-label">Find Newer Research</div>
       <div class="bento-desc">A paper was retracted? Find what research replaced it.</div>
@@ -561,13 +561,13 @@
     <div class="modal-content">
       <div class="modal-header">
         <h2>✅ Check a Paper</h2>
-        <button class="close-btn" onclick="closeModal('check')">&times;</button>
+        <button class="close-btn" data-action="close-modal" data-modal="check">&times;</button>
       </div>
       <div class="form-group">
         <label for="check-doi">DOI (e.g. 10.1016/S0140-6736(97)11096-0)</label>
-        <input type="text" id="check-doi" placeholder="10.xxxx/xxxxx" onkeydown="if(event.key==='Enter')runCheck()">
+        <input type="text" id="check-doi" placeholder="10.xxxx/xxxxx" data-enter="run-check">
       </div>
-      <button class="btn" id="check-btn" onclick="runCheck()">Run Check</button>
+      <button class="btn" id="check-btn" data-action="run-check">Run Check</button>
       <div class="results" id="check-results"></div>
     </div>
   </div>
@@ -576,18 +576,18 @@
     <div class="modal-content">
       <div class="modal-header">
         <h2>🔎 Search Works</h2>
-        <button class="close-btn" onclick="closeModal('search')">&times;</button>
+        <button class="close-btn" data-action="close-modal" data-modal="search">&times;</button>
       </div>
       <div class="form-group">
         <label for="search-query">Topic or keywords</label>
-        <input type="text" id="search-query" placeholder="e.g. CRISPR gene editing" onkeydown="if(event.key==='Enter')runSearch()">
+        <input type="text" id="search-query" placeholder="e.g. CRISPR gene editing" data-enter="run-search">
       </div>
       <div class="form-group">
         <label>Results: <span class="limit-val" id="search-limit-val">10</span></label>
         <input type="range" id="search-limit" min="5" max="25" value="10"
-               oninput="document.getElementById('search-limit-val').textContent=this.value">
+               data-mirror="search-limit-val">
       </div>
-      <button class="btn" id="search-btn" onclick="runSearch()">Search</button>
+      <button class="btn" id="search-btn" data-action="run-search">Search</button>
       <div class="results" id="search-results"></div>
     </div>
   </div>
@@ -596,18 +596,18 @@
     <div class="modal-content">
       <div class="modal-header">
         <h2>🔁 Find Newer Research</h2>
-        <button class="close-btn" onclick="closeModal('superseded')">&times;</button>
+        <button class="close-btn" data-action="close-modal" data-modal="superseded">&times;</button>
       </div>
       <div class="form-group">
         <label for="superseded-doi">DOI of the original paper</label>
-        <input type="text" id="superseded-doi" placeholder="10.xxxx/xxxxx" onkeydown="if(event.key==='Enter')runSuperseded()">
+        <input type="text" id="superseded-doi" placeholder="10.xxxx/xxxxx" data-enter="run-superseded">
       </div>
       <div class="form-group">
         <label>Related works: <span class="limit-val" id="superseded-limit-val">10</span></label>
         <input type="range" id="superseded-limit" min="5" max="25" value="10"
-               oninput="document.getElementById('superseded-limit-val').textContent=this.value">
+               data-mirror="superseded-limit-val">
       </div>
-      <button class="btn" id="superseded-btn" onclick="runSuperseded()">Find Newer Research</button>
+      <button class="btn" id="superseded-btn" data-action="run-superseded">Find Newer Research</button>
       <div class="results" id="superseded-results"></div>
     </div>
   </div>
@@ -1208,6 +1208,36 @@
       if (e.key === 'Escape' && !e.defaultPrevented && !anyExportMenuOpen()) MODALS.forEach(closeModal);
     });
 
+    // --- delegated actions (no inline on*= handlers, so a CSP can block them) --
+    // data-action: click; data-enter: Enter in an input; data-mirror: a range
+    // input writes its value into the element with that id.
+    function onActionClick(e) {
+      const el = e.target && e.target.closest && e.target.closest('[data-action]');
+      if (!el) return;
+      const a = el.dataset.action;
+      if (a === 'open-modal') openModal(el.dataset.modal, el.dataset.arg);
+      else if (a === 'close-modal') closeModal(el.dataset.modal);
+      else if (a === 'run-check') runCheck();
+      else if (a === 'run-search') runSearch();
+      else if (a === 'run-superseded') runSuperseded();
+      else if (a === 'sign-in') pubveraSignIn();
+    }
+    function onEnterKey(e) {
+      if (e.key !== 'Enter' || !e.target || !e.target.dataset) return;
+      const a = e.target.dataset.enter;
+      if (a === 'run-check') runCheck();
+      else if (a === 'run-search') runSearch();
+      else if (a === 'run-superseded') runSuperseded();
+    }
+    function onMirrorInput(e) {
+      const id = e.target && e.target.dataset && e.target.dataset.mirror;
+      const out = id && document.getElementById(id);
+      if (out) out.textContent = e.target.value;
+    }
+    document.addEventListener('click', onActionClick);
+    document.addEventListener('keydown', onEnterKey);
+    document.addEventListener('input', onMirrorInput);
+
     // --- fetch plumbing -----------------------------------------------------
     // Bearer token for the auth layer sitting in front of the API. Read at
     // REQUEST time, never cached at page load: the Supabase client refreshes the
@@ -1292,7 +1322,7 @@
         // The raw error ("missing/invalid token") tells the user nothing they
         // can act on, and the remedy is always the same, so it is not shown.
         const btn = (window.pubveraAuth && window.pubveraAuth.enabled)
-          ? '<button type="button" class="btn" onclick="pubveraSignIn()">Sign in with Google</button>'
+          ? '<button type="button" class="btn" data-action="sign-in">Sign in with Google</button>'
           : '';
         return '<div class="errcard"><h4>Sign-in required</h4>' +
           '<p>Please sign in to run this check.</p>' + btn + '</div>';
