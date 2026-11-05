@@ -17,7 +17,7 @@ import (
 // wantPolicy is written out here rather than taken from contentSecurityPolicy,
 // so a change to any directive in csp.go fails a test.
 func wantPolicy(nonce string) string {
-	return "script-src 'nonce-" + nonce + "' 'strict-dynamic' https: 'unsafe-inline'; script-src-attr 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+	return "script-src 'nonce-" + nonce + "' 'strict-dynamic' https: 'unsafe-inline'; script-src-attr 'none'; style-src 'nonce-" + nonce + "'; style-src-attr 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 }
 
 // The header names and the marker are spelled out so a renamed constant cannot
@@ -34,12 +34,6 @@ const wantScriptTags = 4
 
 // Style S1: index.html has 1 <style> tag; it carries the same nonce marker.
 const wantStyleTags = 1
-
-// wantStylePolicy is the style policy sent as Content-Security-Policy-Report-Only,
-// written out here for the same reason as wantPolicy.
-func wantStylePolicy(nonce string) string {
-	return "style-src 'nonce-" + nonce + "'; style-src-attr 'none'"
-}
 
 var styleOpenRE = regexp.MustCompile(`<style\b[^>]*>`)
 
@@ -113,32 +107,28 @@ func TestCSPHeaderIsEnforcingWithExactPolicy(t *testing.T) {
 	}
 }
 
-// TestCSPReportOnlyIsStyleOnly does not use indexNonce, so a missing
-// enforcing header does not hide the Report-Only-header check. Scripts are
-// enforced; only the style policy (S1) is Report-Only.
-func TestCSPReportOnlyIsStyleOnly(t *testing.T) {
+// TestCSPNoReportOnlyHeader does not use indexNonce, so a missing enforcing
+// header does not hide the Report-Only-header check. Style S2: scripts and
+// styles are both enforced, so there is no Report-Only header at all.
+func TestCSPNoReportOnlyHeader(t *testing.T) {
 	rec := getRoot(t, http.HandlerFunc(handleRoot), "/", "")
-	if got := rec.Header().Get(enforcingHeader); got == "" {
-		t.Errorf("GET /: %s = %q, want a policy", enforcingHeader, got)
+	if got := rec.Header().Values(reportOnlyHeader); len(got) != 0 {
+		t.Errorf("GET /: %s = %q, want none", reportOnlyHeader, got)
 	}
-	got := rec.Header().Get(reportOnlyHeader)
-	if !strings.HasPrefix(got, "style-src ") {
-		t.Errorf("GET /: %s = %q, want the style policy", reportOnlyHeader, got)
-	}
-	if strings.Contains(got, "script-src") {
-		t.Errorf("GET /: %s = %q, want no script directive: scripts are enforced", reportOnlyHeader, got)
+	if got := rec.Header().Values(enforcingHeader); len(got) != 1 {
+		t.Errorf("GET /: %s sent %d times (%q), want 1", enforcingHeader, len(got), got)
 	}
 }
 
-// Style S1: the Report-Only header names the same nonce as the enforcing
-// script policy, with exactly style-src and style-src-attr 'none'.
-func TestCSPStyleReportOnlyExactPolicy(t *testing.T) {
+// Style S2: the enforcing header names the script nonce for style-src too and
+// blocks every inline style attribute.
+func TestCSPStyleIsEnforced(t *testing.T) {
 	nonce, _, h := indexNonce(t)
-	if got := h.Get(reportOnlyHeader); got != wantStylePolicy(nonce) {
-		t.Errorf("%s = %q, want %q", reportOnlyHeader, got, wantStylePolicy(nonce))
-	}
-	if got := h.Values(reportOnlyHeader); len(got) != 1 {
-		t.Errorf("%s sent %d times, want 1", reportOnlyHeader, len(got))
+	got := h.Get(enforcingHeader)
+	for _, want := range []string{"style-src 'nonce-" + nonce + "'", "style-src-attr 'none'"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s = %q, want it to contain %q", enforcingHeader, got, want)
+		}
 	}
 }
 
