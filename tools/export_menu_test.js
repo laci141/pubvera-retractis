@@ -90,7 +90,7 @@ for (let i = html.indexOf("document.addEventListener('keydown'"); i >= 0;
 }
 if (modalKeys.length !== 1) refuse("exactly one document keydown listener that calls closeModal (" + modalKeys.length + " found)");
 const modalEsc = modalKeys[0];
-const styleStart = html.indexOf("<style>");
+const styleStart = html.search(/<style\b[^>]*>/);
 const styleEnd = html.indexOf("</style>");
 if (styleStart < 0 || styleEnd < styleStart) refuse("the <style> block");
 const style = html.slice(styleStart, styleEnd).replace(/\/\*[^]*?\*\//g, "");
