@@ -240,6 +240,9 @@
       animation: fadeIn 0.3s ease;
     }
     .modal.active { display: flex; }
+    #modal-check      { --color: #00d4ff; }
+    #modal-search     { --color: #7c3aed; }
+    #modal-superseded { --color: #22c55e; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .modal-content {
       background: rgba(26, 26, 46, 0.92);
@@ -316,6 +319,7 @@
     }
     .badge.ok  { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
     .badge.bad { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); }
+    .badge.badge-lg { font-size: 0.85rem; padding: 0.2rem 0.7rem; }
     .pill {
       display: inline-block;
       background: rgba(251, 191, 36, 0.12);
@@ -557,7 +561,7 @@
   </section>
 
   <!-- MODALS -->
-  <div class="modal" id="modal-check" style="--color:#00d4ff">
+  <div class="modal" id="modal-check">
     <div class="modal-content">
       <div class="modal-header">
         <h2>✅ Check a Paper</h2>
@@ -572,7 +576,7 @@
     </div>
   </div>
 
-  <div class="modal" id="modal-search" style="--color:#7c3aed">
+  <div class="modal" id="modal-search">
     <div class="modal-content">
       <div class="modal-header">
         <h2>🔎 Search Works</h2>
@@ -592,7 +596,7 @@
     </div>
   </div>
 
-  <div class="modal" id="modal-superseded" style="--color:#22c55e">
+  <div class="modal" id="modal-superseded">
     <div class="modal-content">
       <div class="modal-header">
         <h2>🔁 Find Newer Research</h2>
@@ -690,6 +694,17 @@
       const y = Number(m[0]);
       if (y < 1500 || y > new Date().getFullYear() + 5) return null;
       return y;
+    }
+
+    // Citation bars carry their width as data-bar-width and get it through
+    // CSSOM here, so no inline style attribute is needed (CSP style-src-attr).
+    // A missing or non-numeric value sets nothing, as the old invalid
+    // width:NaN% declaration did.
+    function applyBarWidths(root) {
+      root.querySelectorAll('.bar-chart[data-bar-width]').forEach(el => {
+        const v = el.getAttribute('data-bar-width');
+        if (v && Number.isFinite(Number(v))) el.style.width = v + '%';
+      });
     }
 
     // --- EXPORT SUITE (CSV / Excel / BibTeX / JSON) -------------------------
@@ -1540,8 +1555,8 @@
         const headTitle = decodeEntities(d.title || '');
         let h = '<p class="paper-title">' + esc(headTitle || '(no title)') + '</p>';
         h += '<p class="meta-line">' +
-             (d.retracted ? '<span class="badge bad" style="font-size:0.85rem;padding:0.2rem 0.7rem">⚠ RETRACTED</span>'
-                          : '<span class="badge ok" style="font-size:0.85rem;padding:0.2rem 0.7rem">✓ Not retracted</span>') +
+             (d.retracted ? '<span class="badge bad badge-lg">⚠ RETRACTED</span>'
+                          : '<span class="badge ok badge-lg">✓ Not retracted</span>') +
              (d.from_year ? ' &nbsp;newer research since ' + esc(d.from_year) : '') + '</p>';
         const normDoi = s => {
           let x = String(s || '').toLowerCase().trim();
@@ -1571,7 +1586,7 @@
             const cited = r.cited_by_count || 0;
             const pct = Math.round(cited / maxCited * 100);
             const bar = '<div class="bar-container"><span class="bar-number">' + cited.toLocaleString() + '</span>' +
-                        '<div class="bar-chart" style="width:' + pct + '%"></div></div>';
+                        '<div class="bar-chart" data-bar-width="' + pct + '"></div></div>';
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
                  '<td>' + esc(decodeEntities(r.title || '') || '(untitled)') + '<br><small>' + doiLink(r.doi) + '</small></td>' +
                  '<td>' + esc(toYear(r.publication_year) || '—') + '</td>' +
@@ -1580,6 +1595,7 @@
           h += '</table></div>';
         }
         out.innerHTML = h;
+        applyBarWidths(out);
         refreshQcount(out);
       } catch (err) { showError(out, err); }
     }
