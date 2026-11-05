@@ -179,7 +179,6 @@ func serveIndex(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set(cspHeaderName, contentSecurityPolicy(nonce))
-	w.Header().Set(cspReportOnlyHeaderName, styleReportOnlyPolicy(nonce))
 	w.Write(data)
 }
 
