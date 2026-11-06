@@ -11,8 +11,10 @@ import (
 
 // CSP phase 2: every <script> tag in index.html carries nonce="__CSP_NONCE__",
 // and each index response replaces that marker with a fresh nonce named in the
-// enforcing Content-Security-Policy header. All requests go in-process
-// through getRoot (root_cache_test.go), on handleRoot or on newMux().
+// enforcing Content-Security-Policy header. The only
+// Content-Security-Policy-Report-Only header is connect-src (csp_report.go).
+// All requests go in-process through getRoot (root_cache_test.go), on
+// handleRoot or on newMux().
 
 // wantPolicy is written out here rather than taken from contentSecurityPolicy,
 // so a change to any directive in csp.go fails a test.
@@ -107,13 +109,17 @@ func TestCSPHeaderIsEnforcingWithExactPolicy(t *testing.T) {
 	}
 }
 
-// TestCSPNoReportOnlyHeader does not use indexNonce, so a missing enforcing
-// header does not hide the Report-Only-header check. Style S2: scripts and
-// styles are both enforced, so there is no Report-Only header at all.
-func TestCSPNoReportOnlyHeader(t *testing.T) {
+// TestCSPReportOnlyIsConnectSrcOnly replaces TestCSPNoReportOnlyHeader: style
+// S2 forbade any Report-Only header, connect-src PR A brings one back for
+// connect-src only, exactly cspConnectSrc for the test environment. It does
+// not use indexNonce, so a missing enforcing header does not hide the
+// Report-Only check. Header().Set keeps only the last value, so exactly one
+// value of each is required.
+func TestCSPReportOnlyIsConnectSrcOnly(t *testing.T) {
+	_, _, origin := supabaseConfig()
 	rec := getRoot(t, http.HandlerFunc(handleRoot), "/", "")
-	if got := rec.Header().Values(reportOnlyHeader); len(got) != 0 {
-		t.Errorf("GET /: %s = %q, want none", reportOnlyHeader, got)
+	if got := rec.Header().Values(reportOnlyHeader); len(got) != 1 || got[0] != cspConnectSrc(origin) {
+		t.Errorf("GET /: %s = %q, want exactly [%q]", reportOnlyHeader, got, cspConnectSrc(origin))
 	}
 	if got := rec.Header().Values(enforcingHeader); len(got) != 1 {
 		t.Errorf("GET /: %s sent %d times (%q), want 1", enforcingHeader, len(got), got)
@@ -194,7 +200,7 @@ func TestCSPRandFailureIs500(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("GET /: status = %d, want 500", rec.Code)
 	}
-	for _, name := range []string{reportOnlyHeader, enforcingHeader} {
+	for _, name := range []string{reportOnlyHeader, enforcingHeader, "Reporting-Endpoints"} {
 		if got := rec.Header().Get(name); got != "" {
 			t.Errorf("GET /: %s = %q, want none", name, got)
 		}
@@ -231,7 +237,7 @@ func TestCSPMissingIndexIs404WithoutPolicy(t *testing.T) {
 // this test goes through the full route table.
 func TestCSPOnlyOnTheIndexPage(t *testing.T) {
 	mux := newMux()
-	for _, path := range []string{"/nope", "/config.json", "/healthz"} {
+	for _, path := range []string{"/nope", "/config.json", "/healthz", "/version", "/csp-report"} {
 		rec := getRoot(t, mux, path, "")
 		for _, name := range []string{reportOnlyHeader, enforcingHeader} {
 			if got := rec.Header().Get(name); got != "" {
