@@ -9,8 +9,8 @@ import "crypto/rand"
 //
 // Style S2: the one <style> tag carries the same marker, and the same
 // enforcing header blocks styles without the nonce and every inline style
-// attribute. connect-src runs in Report-Only in a separate header, set up in
-// csp_report.go.
+// attribute. connect-src is enforced in the same one header; its tail comes
+// from cspConnectSrc in csp_report.go.
 const (
 	nonceMarker   = "__CSP_NONCE__"
 	cspHeaderName = "Content-Security-Policy"
