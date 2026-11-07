@@ -267,6 +267,7 @@ jobs:
         with:
           name: retractis-image
           if-no-files-found: error
+          retention-days: 1
           path: |
             ${{ runner.temp }}/retractis-image.tar
             ${{ runner.temp }}/iid.txt
