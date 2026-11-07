@@ -17,11 +17,11 @@ import (
 	"unicode/utf8"
 )
 
-// connect-src, PR A of 2: the index page sends connect-src in a separate
-// Content-Security-Policy-Report-Only header, so nothing new is blocked; the
-// browser reports what it would have blocked to POST /csp-report, which logs
-// it. supabaseConfig, cspHostRE and the collector are copied from Recallis
-// (1b13dde, from Grantvera) with identical behaviour.
+// connect-src is enforced: the one enforcing Content-Security-Policy header on
+// the index response (main.go) ends with connect-src and the report
+// directives, so the browser blocks a disallowed connection and reports it to
+// POST /csp-report, which logs it. supabaseConfig, cspHostRE and the collector
+// are copied from Recallis (1b13dde, from Grantvera) with identical behaviour.
 
 // supabaseConfig is the one place that decides whether the page has a Supabase
 // config. /config.json hands url and key to the page; the index response puts
@@ -51,11 +51,12 @@ func supabaseConfig() (supaURL, supaKey, origin string) {
 // in a host, which inside a CSP header would start a new directive.
 var cspHostRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$`)
 
-// cspConnectSrc is the whole Content-Security-Policy-Report-Only value
-// for one index response: connect-src ('self', plus origin when non-empty) and
-// the report directives.
+// cspConnectSrc is the tail of the enforcing policy for one index response:
+// it starts with "; " so it appends to contentSecurityPolicy(nonce), and it
+// carries connect-src ('self', plus origin when non-empty) and the report-to /
+// report-uri directives, which apply to every directive of that one header.
 func cspConnectSrc(origin string) string {
-	src := "connect-src 'self'"
+	src := "; connect-src 'self'"
 	if origin != "" {
 		src += " " + origin
 	}

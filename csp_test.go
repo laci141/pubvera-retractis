@@ -11,8 +11,9 @@ import (
 
 // CSP phase 2: every <script> tag in index.html carries nonce="__CSP_NONCE__",
 // and each index response replaces that marker with a fresh nonce named in the
-// enforcing Content-Security-Policy header. The only
-// Content-Security-Policy-Report-Only header is connect-src (csp_report.go).
+// enforcing Content-Security-Policy header. connect-src is enforced in that
+// same one header (csp_report.go); no response carries a
+// Content-Security-Policy-Report-Only header.
 // All requests go in-process through getRoot (root_cache_test.go), on
 // handleRoot or on newMux().
 
@@ -22,8 +23,20 @@ func wantPolicy(nonce string) string {
 	return "script-src 'nonce-" + nonce + "' 'strict-dynamic' https: 'unsafe-inline'; script-src-attr 'none'; style-src 'nonce-" + nonce + "'; style-src-attr 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 }
 
+// wantConnectTail is the connect-src tail of the enforcing policy, written out
+// for the same reason: 'self', plus origin when non-empty, and the report
+// directives.
+func wantConnectTail(origin string) string {
+	src := "; connect-src 'self'"
+	if origin != "" {
+		src += " " + origin
+	}
+	return src + "; report-to csp; report-uri /csp-report"
+}
+
 // The header names and the marker are spelled out so a renamed constant cannot
-// agree with itself.
+// agree with itself. reportOnlyHeader is the forbidden header name: tests only
+// assert that it is absent.
 const (
 	reportOnlyHeader = "Content-Security-Policy-Report-Only"
 	enforcingHeader  = "Content-Security-Policy"
@@ -100,26 +113,24 @@ func TestCSPHeaderNonceMatchesEveryBodyNonce(t *testing.T) {
 }
 
 func TestCSPHeaderIsEnforcingWithExactPolicy(t *testing.T) {
+	_, _, origin := supabaseConfig()
 	nonce, _, h := indexNonce(t)
-	if got := h.Get(enforcingHeader); got != wantPolicy(nonce) {
-		t.Errorf("%s = %q, want %q", enforcingHeader, got, wantPolicy(nonce))
+	if got, want := h.Get(enforcingHeader), wantPolicy(nonce)+wantConnectTail(origin); got != want {
+		t.Errorf("%s = %q, want %q", enforcingHeader, got, want)
 	}
 	if cspHeaderName != enforcingHeader {
 		t.Errorf("cspHeaderName = %q, want %q", cspHeaderName, enforcingHeader)
 	}
 }
 
-// TestCSPReportOnlyIsConnectSrcOnly replaces TestCSPNoReportOnlyHeader: style
-// S2 forbade any Report-Only header, connect-src PR A brings one back for
-// connect-src only, exactly cspConnectSrc for the test environment. It does
-// not use indexNonce, so a missing enforcing header does not hide the
-// Report-Only check. Header().Set keeps only the last value, so exactly one
-// value of each is required.
-func TestCSPReportOnlyIsConnectSrcOnly(t *testing.T) {
-	_, _, origin := supabaseConfig()
+// connect-src is enforced: the index response carries exactly one enforcing
+// header and no Content-Security-Policy-Report-Only header at all. It does not
+// use indexNonce, so a missing enforcing header does not hide the absence
+// check.
+func TestCSPNoReportOnlyHeader(t *testing.T) {
 	rec := getRoot(t, http.HandlerFunc(handleRoot), "/", "")
-	if got := rec.Header().Values(reportOnlyHeader); len(got) != 1 || got[0] != cspConnectSrc(origin) {
-		t.Errorf("GET /: %s = %q, want exactly [%q]", reportOnlyHeader, got, cspConnectSrc(origin))
+	if got := rec.Header().Values(reportOnlyHeader); len(got) != 0 {
+		t.Errorf("GET /: %s = %q, want none", reportOnlyHeader, got)
 	}
 	if got := rec.Header().Values(enforcingHeader); len(got) != 1 {
 		t.Errorf("GET /: %s sent %d times (%q), want 1", enforcingHeader, len(got), got)
