@@ -369,7 +369,8 @@
     /* citation mini-bars (thelancet-web pattern) */
     .bar-container { display: flex; align-items: center; gap: 8px; }
     .bar-number { font-weight: 700; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
-    .bar-chart { height: 14px; background: linear-gradient(90deg, #00d4ff, #7c3aed); border-radius: 4px; flex: 1; max-width: 150px; opacity: 0.85; }
+    .bar-track { flex: 1; max-width: 150px; min-width: 40px; height: 14px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+    .bar-chart { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #00d4ff, #7c3aed); border-radius: 4px; opacity: 0.85; }
     .bar-chart:hover { opacity: 1; }
 
     /* EXPORT SUITE + QUICK FILTER (export-suite skill) */
@@ -1586,7 +1587,7 @@
             const cited = r.cited_by_count || 0;
             const pct = Math.round(cited / maxCited * 100);
             const bar = '<div class="bar-container"><span class="bar-number">' + cited.toLocaleString() + '</span>' +
-                        '<div class="bar-chart" data-bar-width="' + pct + '"></div></div>';
+                        '<div class="bar-track"><div class="bar-chart" data-bar-width="' + pct + '"></div></div></div>';
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
                  '<td>' + esc(decodeEntities(r.title || '') || '(untitled)') + '<br><small>' + doiLink(r.doi) + '</small></td>' +
                  '<td>' + esc(toYear(r.publication_year) || '—') + '</td>' +

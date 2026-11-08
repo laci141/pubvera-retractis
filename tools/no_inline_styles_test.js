@@ -87,7 +87,7 @@ check("S5 not-retracted badge is class=\"badge ok badge-lg\" (found " + count("<
   count("<span class=\"badge ok badge-lg\">✓ Not retracted</span>") === 1);
 
 // ── S6: data-bar-width and the CSSOM helper ──
-const barStr = "'<div class=\"bar-chart\" data-bar-width=\"' + pct + '\"></div></div>'";
+const barStr = "'<div class=\"bar-track\"><div class=\"bar-chart\" data-bar-width=\"' + pct + '\"></div></div></div>'";
 check("S6 bar-chart string carries data-bar-width (found " + count(barStr) + ")", count(barStr) === 1);
 const open = "function applyBarWidths(root) {";
 let fn = "";
