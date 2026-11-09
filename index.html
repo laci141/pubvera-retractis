@@ -205,6 +205,11 @@
       margin: 0 auto;
     }
     .bento-card {
+      /* a native <button>: reset the user-agent defaults so it renders like the old div */
+      font: inherit;
+      letter-spacing: inherit;
+      color: inherit;
+      margin: 0;
       padding: 2rem;
       cursor: pointer;
       transition: all 0.3s ease;
@@ -219,6 +224,7 @@
       border-color: rgba(255, 255, 255, 0.3);
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
     }
+    .bento-card:focus-visible { outline: 2px solid var(--color); outline-offset: 3px; }
     .bento-card.check      { --color: #00d4ff; border-left: 4px solid var(--color); }
     .bento-card.search     { --color: #7c3aed; border-left: 4px solid var(--color); }
     .bento-card.superseded { --color: #22c55e; border-left: 4px solid var(--color); }
@@ -545,21 +551,21 @@
 
   <!-- BENTO CARDS -->
   <section class="bento-grid">
-    <div class="bento-card glass-panel check" data-action="open-modal" data-modal="check">
-      <div class="bento-icon">✅</div>
-      <div class="bento-label">Check a Paper</div>
-      <div class="bento-desc">Paste a DOI and instantly see if the paper was retracted.</div>
-    </div>
-    <div class="bento-card glass-panel search" data-action="open-modal" data-modal="search">
-      <div class="bento-icon">🔎</div>
-      <div class="bento-label">Search Works</div>
-      <div class="bento-desc">Search millions of papers by topic via Crossref.</div>
-    </div>
-    <div class="bento-card glass-panel superseded" data-action="open-modal" data-modal="superseded">
-      <div class="bento-icon">🔁</div>
-      <div class="bento-label">Find Newer Research</div>
-      <div class="bento-desc">A paper was retracted? Find what research replaced it.</div>
-    </div>
+    <button type="button" class="bento-card glass-panel check" data-action="open-modal" data-modal="check">
+      <span class="bento-icon" aria-hidden="true">✅</span>
+      <span class="bento-label">Check a Paper</span>
+      <span class="bento-desc">Paste a DOI and instantly see if the paper was retracted.</span>
+    </button>
+    <button type="button" class="bento-card glass-panel search" data-action="open-modal" data-modal="search">
+      <span class="bento-icon" aria-hidden="true">🔎</span>
+      <span class="bento-label">Search Works</span>
+      <span class="bento-desc">Search millions of papers by topic via Crossref.</span>
+    </button>
+    <button type="button" class="bento-card glass-panel superseded" data-action="open-modal" data-modal="superseded">
+      <span class="bento-icon" aria-hidden="true">🔁</span>
+      <span class="bento-label">Find Newer Research</span>
+      <span class="bento-desc">A paper was retracted? Find what research replaced it.</span>
+    </button>
   </section>
 
   <!-- MODALS -->
