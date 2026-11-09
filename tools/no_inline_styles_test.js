@@ -15,7 +15,7 @@
 //   S5 both runSuperseded badge strings carry badge-lg;
 //   S6 the bar-chart string carries data-bar-width and applyBarWidths sets
 //      style.width from getAttribute('data-bar-width');
-//   S7 applyBarWidths runs in a vm: "37" -> 37%, "100" -> 100%, missing and
+//   S7 applyBarWidths runs in a vm: "37" -> max(2px, 37%), "100" -> max(2px, 100%), missing and
 //      "abc" -> no width (the old width:NaN% was an ignored declaration);
 //   S8 applyBarWidths is called after out.innerHTML in runSuperseded;
 //   S9 the vm stub offers only querySelectorAll on the scoped root.
@@ -118,7 +118,7 @@ try {
   console.log("      vm error: " + e.message);
 }
 const got = JSON.stringify(res);
-check("S7 widths 37/100/missing/abc -> " + got, got === JSON.stringify(["37%", "100%", "(unset)", "(unset)"]));
+check("S7 widths 37/100/missing/abc -> " + got, got === JSON.stringify(["max(2px, 37%)", "max(2px, 100%)", "(unset)", "(unset)"]));
 check("S9 stub root needs only querySelectorAll, selector " + JSON.stringify(sels),
   res !== null && sels.length === 1 && sels[0] === ".bar-chart[data-bar-width]");
 

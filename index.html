@@ -368,8 +368,8 @@
     .table-wrap { overflow-x: auto; }
     /* citation mini-bars (thelancet-web pattern) */
     .bar-container { display: flex; align-items: center; gap: 8px; }
-    .bar-number { font-weight: 700; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
-    .bar-track { flex: 1; max-width: 150px; min-width: 40px; height: 14px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+    .bar-number { font-weight: 700; min-width: 6ch; text-align: right; font-variant-numeric: tabular-nums; }
+    .bar-track { flex: 1; max-width: 150px; min-width: clamp(60px, calc(50px + 4vw), 100px); height: 14px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
     .bar-chart { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #00d4ff, #7c3aed); border-radius: 4px; opacity: 0.85; }
     .bar-chart:hover { opacity: 1; }
 
@@ -700,11 +700,12 @@
     // Citation bars carry their width as data-bar-width and get it through
     // CSSOM here, so no inline style attribute is needed (CSP style-src-attr).
     // A missing or non-numeric value sets nothing, as the old invalid
-    // width:NaN% declaration did.
+    // width:NaN% declaration did. A value above 0 gets a 2px floor via
+    // max(2px, v%), so every non-zero count shows a visible bar; 0 sets width 0.
     function applyBarWidths(root) {
       root.querySelectorAll('.bar-chart[data-bar-width]').forEach(el => {
         const v = el.getAttribute('data-bar-width');
-        if (v && Number.isFinite(Number(v))) el.style.width = v + '%';
+        if (v && Number.isFinite(Number(v))) el.style.width = Number(v) > 0 ? 'max(2px, ' + v + '%)' : '0';
       });
     }
 
@@ -1585,7 +1586,7 @@
           h += '<div class="table-wrap"><table><tr><th>#</th><th>Related work</th><th>Year</th><th>Citations</th></tr>';
           rel.forEach((r, i) => {
             const cited = r.cited_by_count || 0;
-            const pct = Math.round(cited / maxCited * 100);
+            const pct = cited > 0 ? Math.max(0.001, cited / maxCited * 100).toFixed(3) : '0';
             const bar = '<div class="bar-container"><span class="bar-number">' + cited.toLocaleString() + '</span>' +
                         '<div class="bar-track"><div class="bar-chart" data-bar-width="' + pct + '"></div></div></div>';
             h += '<tr><td class="n">' + (i + 1) + '</td>' +
