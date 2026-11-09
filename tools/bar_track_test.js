@@ -1,4 +1,4 @@
-// Bar track test (B1-B3): citation bars are a fixed .bar-track with a .bar-chart
+// Bar track test (B1-B9): citation bars are a fixed .bar-track with a .bar-chart
 // fill inside, so the fill's CSSOM width (data-bar-width %) shows the value.
 //
 // Run: node tools/bar_track_test.js
@@ -86,6 +86,28 @@ const cases = [["50", "max(2px, 50%)"], ["0.008", "max(2px, 0.008%)"], ["0", "0"
 const got = cases.map(([a]) => widthFor(a));
 check("B7 applyBarWidths: 50, 0.008, 0, missing, abc => " + JSON.stringify(got),
   cases.every(([, want], i) => got[i] === want));
+
+check("B8 exactly one .bar-chart rule (found " + chart.length + ") with linear-gradient(90deg,#00d4ff,#a78bfa), no #7c3aed, opacity:0.85 (\"" + c + "\")",
+  chart.length === 1 && c.indexOf("linear-gradient(90deg,#00d4ff,#a78bfa)") >= 0 && c.indexOf("#7c3aed") < 0 && has(c, "opacity:0.85"));
+
+// B9 contrast (WCAG 1.4.11, >= 3.5 as a margin above 3:1). Assumption: the panel
+// background is BG = rgb(24,24,42) and the track is rgba(255,255,255,0.08) over BG,
+// as measured in headless Chromium. The fill is painted at its opacity over the track.
+const BG = [24, 24, 42];
+const TRACK = BG.map(v => 0.08 * 255 + 0.92 * v);
+function lum(rgb) {
+  const l = rgb.map(v => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+  return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+}
+function ratio(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+function over(stop, op, under) { return stop.map((v, i) => op * v + (1 - op) * under[i]); }
+const gm = c.match(/linear-gradient\(([^)]*)\)/);
+const stops = gm ? (gm[1].match(/#[0-9a-fA-F]{6}\b/g) || []).map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))) : [];
+const om = c.match(/(^|;)opacity:([0-9.]+)(;|$)/);
+const op = om ? parseFloat(om[2]) : NaN;
+const ratios = stops.map(st => [ratio(over(st, op, TRACK), TRACK), ratio(over(st, op, BG), BG)]);
+check("B9 gradient stops at opacity " + op + " vs track / vs panel: " + ratios.map(r => r[0].toFixed(2) + " / " + r[1].toFixed(2)).join(", ") + " (all must be >= 3.5)",
+  stops.length >= 2 && !isNaN(op) && ratios.every(r => r[0] >= 3.5 && r[1] >= 3.5));
 
 if (ran === 0) {
   console.error("FAIL: zero checks ran - refusing to pass silently");

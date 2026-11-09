@@ -370,7 +370,8 @@
     .bar-container { display: flex; align-items: center; gap: 8px; }
     .bar-number { font-weight: 700; min-width: 6ch; text-align: right; font-variant-numeric: tabular-nums; }
     .bar-track { flex: 1; max-width: 150px; min-width: clamp(60px, calc(50px + 4vw), 100px); height: 14px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
-    .bar-chart { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #00d4ff, #7c3aed); border-radius: 4px; opacity: 0.85; }
+    /* gradient end #a78bfa: keeps >= 3:1 (WCAG 1.4.11) against the track and the panel at opacity 0.85 */
+    .bar-chart { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #00d4ff, #a78bfa); border-radius: 4px; opacity: 0.85; }
     .bar-chart:hover { opacity: 1; }
 
     /* EXPORT SUITE + QUICK FILTER (export-suite skill) */
