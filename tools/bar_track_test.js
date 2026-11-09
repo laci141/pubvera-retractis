@@ -55,6 +55,38 @@ const nested = "'<div class=\"bar-track\"><div class=\"bar-chart\" data-bar-widt
 const n = html.split(nested).length - 1;
 check("B3 bar string has bar-chart inside bar-track exactly once (found " + n + ")", n === 1);
 
+const num = rules(".bar-number");
+const bn = num[0] || "";
+check("B4 exactly one .bar-number rule (found " + num.length + ") with min-width:6ch and tabular-nums (\"" + bn + "\")",
+  num.length === 1 && has(bn, "min-width:6ch") && has(bn, "font-variant-numeric:tabular-nums"));
+
+check("B5 .bar-track rule has min-width:clamp(60px,calc(50px+4vw),100px) and max-width:150px (\"" + t + "\")",
+  has(t, "min-width:clamp(60px,calc(50px+4vw),100px)") && has(t, "max-width:150px"));
+
+const supStart = html.indexOf("async function runSuperseded");
+if (supStart < 0) refuse("runSuperseded");
+const supEnd = html.indexOf("\n    }\n", supStart);
+if (supEnd < 0) refuse("the end of runSuperseded");
+const sup = html.slice(supStart, supEnd);
+const pctLine = (sup.match(/^.*const pct = .*$/m) || [""])[0].trim();
+check("B6 superseded pct line uses Math.max(0.001 and toFixed(3), no Math.round(cited (\"" + pctLine + "\")",
+  pctLine.indexOf("toFixed(3)") >= 0 && pctLine.indexOf("Math.max(0.001") >= 0 && sup.indexOf("Math.round(cited") < 0);
+
+const fnStart = html.indexOf("function applyBarWidths(root)");
+if (fnStart < 0) refuse("applyBarWidths");
+const fnEnd = html.indexOf("\n    }\n", fnStart);
+if (fnEnd < 0) refuse("the end of applyBarWidths");
+const applyBarWidths = new Function(html.slice(fnStart, fnEnd + 6) + "\nreturn applyBarWidths;")();
+function widthFor(attr) {
+  const el = { style: { width: "untouched" }, getAttribute: () => (attr === undefined ? null : attr) };
+  applyBarWidths({ querySelectorAll: () => [el] });
+  return el.style.width;
+}
+const cases = [["50", "max(2px, 50%)"], ["0.008", "max(2px, 0.008%)"], ["0", "0"], [undefined, "untouched"], ["abc", "untouched"]];
+const got = cases.map(([a]) => widthFor(a));
+check("B7 applyBarWidths: 50, 0.008, 0, missing, abc => " + JSON.stringify(got),
+  cases.every(([, want], i) => got[i] === want));
+
 if (ran === 0) {
   console.error("FAIL: zero checks ran - refusing to pass silently");
   process.exit(1);
