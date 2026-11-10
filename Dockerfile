@@ -12,7 +12,11 @@
 # value re-declares it with a bare ARG and inherits this default. Declaring
 # the default inside the builder stage only left the label empty on
 # pubvera-recallis (measured 2026-09-24), and CI now fails on that.
-ARG PP_LIBRARY_COMMIT=58edea349ce3df8a301d4d8950119487c32604b8
+# 0d3fe99 (2026-11-10) is the first reviewed pin that keeps an expression of
+# concern apart from a retraction (separate expression_of_concern and concern_*
+# fields, both can be set) and only counts Crossref updated-by as evidence.
+# It also exits 1 on a failed lookup; main.go maps that to a fixed message.
+ARG PP_LIBRARY_COMMIT=0d3fe99f4474f3396f5f7bdb85efda50295ed409
 
 FROM golang:1.26-alpine AS cli-builder
 ARG PP_LIBRARY_COMMIT

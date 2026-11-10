@@ -325,6 +325,7 @@
     }
     .badge.ok  { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
     .badge.bad { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); }
+    .badge.warn { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.4); }
     .badge.badge-lg { font-size: 0.85rem; padding: 0.2rem 0.7rem; }
     .pill {
       display: inline-block;
@@ -1016,7 +1017,11 @@
           const bits = [];
           if (r["Retraction type"]) bits.push("update type: " + r["Retraction type"]);
           if (r.Signals) bits.push("signals: " + r.Signals);
+          if (r["Expression of concern"] === "Yes") bits.push("expression of concern also recorded");
           lines.push("  note    = {" + bibEsc("RETRACTED" + (bits.length ? ": " + bits.join(" — ") : "") + " (per Crossref retraction data)") + "}");
+        } else if (r["Expression of concern"] === "Yes") {
+          // An expression of concern is a warning, not a retraction: own note.
+          lines.push("  note    = {" + bibEsc("EXPRESSION OF CONCERN" + (r["Concern date"] ? ": " + r["Concern date"] : "") + " (per Crossref update data)") + "}");
         }
         lines.push("}");
         out.push(lines.join("\n"));
@@ -1433,6 +1438,53 @@
       return s;
     }
 
+    // A verdict has three states, not two. An expression of concern warns that
+    // questions were raised about a paper; it is not a retraction, and a paper
+    // can carry both (the CLI sends retracted and expression_of_concern as two
+    // fields). "No retraction signal found" says what was checked: an absent
+    // notice in the Crossref record is not proof that none exists (RET-006).
+    // A verdict with an "error" field is a failed lookup, never "nothing found".
+    function verdictBadges(d) {
+      if (d && d.error) throw new Error('The lookup did not complete, so no retraction status could be determined.');
+      let h = '';
+      if (d.retracted) h += '<div class="badge bad">⚠ RETRACTED</div> ';
+      if (d.expression_of_concern) h += '<div class="badge warn">⚠ EXPRESSION OF CONCERN</div>';
+      if (!d.retracted && !d.expression_of_concern) h += '<div class="badge ok">✓ No retraction signal found in the Crossref record</div>';
+      return h;
+    }
+    // One check verdict as an export row. The concern has its own columns, so a
+    // concern-only paper exports Retracted=No with empty retraction columns.
+    function checkExportRow(d, doi, title) {
+      const eoc = !!d.expression_of_concern;
+      return {
+        DOI: d.doi || doi,
+        Title: title,
+        Year: toYear(d.published),
+        Retracted: d.retracted ? 'Yes' : 'No',
+        'Retraction type': d.retracted ? (d.update_type || '') : '',
+        'Retraction date': d.retracted ? (d.date || '') : '',
+        'Retraction notice DOI': d.retracted ? (d.notice_doi || '') : '',
+        'Expression of concern': eoc ? 'Yes' : 'No',
+        'Concern date': eoc ? (d.concern_date || '') : '',
+        'Concern notice DOI': eoc ? (d.concern_notice_doi || '') : '',
+        Published: d.published || '',
+        Signals: Array.isArray(d.signals) ? d.signals.join('; ') : '',
+        Source: 'Crossref'
+      };
+    }
+    // The expression of concern among a Works search item's updated-by notices
+    // (newest first), or null. Only updated-by counts: update-to points the
+    // other way, from a notice to the work it updates.
+    function concernNotice(it) {
+      const ups = Array.isArray(it && it['updated-by']) ? it['updated-by'] : [];
+      const day = u => {
+        const p = u && u.updated && u.updated['date-parts'] && u.updated['date-parts'][0];
+        return Array.isArray(p) ? p.map((n, i) => i ? String(n).padStart(2, '0') : String(n)).join('-') : '';
+      };
+      return ups.filter(u => u && String(u.type || '').toLowerCase() === 'expression_of_concern')
+                .sort((a, b) => day(b).localeCompare(day(a)))[0] || null;
+    }
+
     // --- CHECK --------------------------------------------------------------
     async function runCheck() {
       const doi = document.getElementById('check-doi').value.trim();
@@ -1443,33 +1495,20 @@
         const d = await callApi('/api/check', { doi }, out, document.getElementById('check-btn'));
         // Decoded once, here at the API boundary, then used by both the screen
         // and every export — so the two can never disagree about the text.
+        const badges = verdictBadges(d);   // throws on a failed lookup, before any state is kept
         const title = decodeEntities(d.title || '');
-        lastData.check = [{
-          DOI: d.doi || doi,
-          Title: title,
-          Year: toYear(d.published),
-          Retracted: d.retracted ? 'Yes' : 'No',
-          'Retraction type': d.retracted ? (d.update_type || '') : '',
-          'Retraction date': d.retracted ? (d.date || '') : '',
-          'Retraction notice DOI': d.retracted ? (d.notice_doi || '') : '',
-          Published: d.published || '',
-          Signals: Array.isArray(d.signals) ? d.signals.join('; ') : '',
-          Source: 'Crossref'
-        }];
+        lastData.check = [checkExportRow(d, doi, title)];
         let h = metaRow('1 record checked', 'check', 'retractis-check.json', { filter: false });
-        if (d.retracted) {
-          h += '<div class="badge bad">⚠ RETRACTED</div>';
-        } else {
-          h += '<div class="badge ok">✓ Not retracted</div>';
-        }
+        h += badges;
         h += '<p class="paper-title">' + esc(title || '(no title returned)') + '</p>';
         h += '<p class="paper-doi">' + doiLink(d.doi || doi) + '</p>';
         const meta = [];
         if (d.retracted && d.update_type) meta.push('Type: ' + esc(d.update_type));
         if (d.published) meta.push('Published: ' + esc(d.published));
         if (d.retracted && d.date) meta.push('Retraction: ' + esc(d.date));
+        if (d.expression_of_concern && d.concern_date) meta.push('Concern: ' + esc(d.concern_date));
         if (meta.length) h += '<p class="meta-line">' + meta.join(' · ') + '</p>';
-        if (d.retracted && Array.isArray(d.signals) && d.signals.length) {
+        if ((d.retracted || d.expression_of_concern) && Array.isArray(d.signals) && d.signals.length) {
           // The raw slug stays reachable in the tooltip: it is what the exports
           // and the CLI use, so anyone matching the two up needs to see it.
           h += '<p>' + d.signals.map(s =>
@@ -1529,6 +1568,7 @@
           const dpAlt = it['published-print'] && it['published-print']['date-parts'] && it['published-print']['date-parts'][0];
           const dpOn = it['published-online'] && it['published-online']['date-parts'] && it['published-online']['date-parts'][0];
           const ret = retractionOf(it);
+          const con = concernNotice(it);
           return {
             DOI: String(it.DOI || ''),
             Title: decodeEntities(Array.isArray(it.title) ? (it.title[0] || '') : (it.title || '')),
@@ -1544,6 +1584,9 @@
             'Retraction type': ret ? decodeEntities(String(ret.label || ret.type || '')) : '',
             'Retraction date': ret ? noticeDate(ret) : '',
             'Retraction notice DOI': ret ? String(ret.DOI || '') : '',
+            'Expression of concern': con ? 'Yes' : 'No',
+            'Concern date': con ? noticeDate(con) : '',
+            'Concern notice DOI': con ? String(con.DOI || '') : '',
             Source: 'Crossref'
           };
         });
@@ -1591,7 +1634,7 @@
         let h = '<p class="paper-title">' + esc(headTitle || '(no title)') + '</p>';
         h += '<p class="meta-line">' +
              (d.retracted ? '<span class="badge bad badge-lg">⚠ RETRACTED</span>'
-                          : '<span class="badge ok badge-lg">✓ Not retracted</span>') +
+                          : '<span class="badge ok badge-lg">✓ No retraction signal found</span>') +
              (d.from_year ? ' &nbsp;newer research since ' + esc(d.from_year) : '') + '</p>';
         const normDoi = s => {
           let x = String(s || '').toLowerCase().trim();

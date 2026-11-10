@@ -342,6 +342,12 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 		}
 		log.Printf("cli: fail cmd=%s wait_ms=%d elapsed_ms=%d err=%v stderr=%s",
 			label, waitMS, elapsed, err, truncate(strings.TrimSpace(stderr.String()), cliStderrLogMax))
+		// The check command reports a failed lookup as a JSON verdict with an
+		// "error" field and a non-zero exit. That is not a crash: it gets the
+		// fixed lookup message instead of "CLI error: exit status 1".
+		if verr := cliVerdictError(label, stdout.Bytes()); verr != nil {
+			return nil, verr
+		}
 		return nil, fmt.Errorf("CLI error: %v", err)
 	}
 
@@ -457,12 +463,52 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := runCLI(r.Context(), "check", req.DOI, "--json")
+	if err == nil {
+		// A CLI that exits 0 on a failed lookup (the one pinned until 2026-11
+		// did) still prints "retracted": false next to the error. Passed
+		// through, the page drew "Not retracted" for a record it never found.
+		err = cliVerdictError("check", out)
+	}
 	if err != nil {
 		log.Print(err)
 		writeCLIError(w, err)
 		return
 	}
 	writeRaw(w, out)
+}
+
+// Fixed texts for a lookup that produced no verdict. The CLI's own error
+// message is not used: client.APIError appends the raw upstream response body,
+// which belongs in the log like stderr, not in an HTTP response.
+const (
+	msgCLINotFound     = "No Crossref record was found for this identifier, so no retraction status could be determined."
+	msgCLILookupFailed = "The lookup did not complete, so no retraction status could be determined. Please try again in a moment."
+)
+
+var (
+	errCLINotFound     = errors.New(msgCLINotFound)
+	errCLILookupFailed = errors.New(msgCLILookupFailed)
+)
+
+// cliVerdictError returns errCLINotFound or errCLILookupFailed when out is a
+// JSON object with a non-empty "error" field, and nil otherwise. The CLI's
+// message goes to the log, capped like stderr.
+func cliVerdictError(label string, out []byte) error {
+	var v struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(bytes.TrimSpace(out), &v) != nil {
+		return nil
+	}
+	msg := strings.TrimSpace(v.Error)
+	if msg == "" {
+		return nil
+	}
+	log.Printf("cli: lookup-error cmd=%s err=%s", label, truncate(msg, cliStderrLogMax))
+	if strings.Contains(msg, "returned HTTP 404") || strings.HasPrefix(msg, "no DOI found for PMID") {
+		return errCLINotFound
+	}
+	return errCLILookupFailed
 }
 
 // ------ API: /api/search ------
