@@ -417,12 +417,18 @@
     .qcount { color: #7dd3fc; font-size: 0.78rem; font-weight: 600; margin-left: 6px; }
 
     /* SORTABLE COLUMN HEADERS */
-    th { cursor: pointer; user-select: none; }
-    th::after { content: " ⇅"; opacity: 0.35; }
-    th[data-dir="asc"]::after { content: " ↑"; opacity: 1; color: var(--color, #00d4ff); }
-    th[data-dir="desc"]::after { content: " ↓"; opacity: 1; color: var(--color, #00d4ff); }
+    /* Each header holds a native <button>: Tab reaches it, Enter and Space
+       activate it, and aria-sort on the <th> tells a screen reader the state.
+       The glyph is decorative: the "/ ''" alternative keeps it out of the
+       accessible name (the plain declaration is the fallback for old engines). */
+    .sort-btn { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
+                text-transform: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; user-select: none; }
+    .sort-btn:focus-visible { outline: 2px solid var(--color, #00d4ff); outline-offset: 2px; border-radius: 3px; }
+    .sort-btn::after { content: " ⇅"; content: " ⇅" / ""; opacity: 0.35; }
+    th[data-dir="asc"] .sort-btn::after { content: " ↑"; content: " ↑" / ""; opacity: 1; color: var(--color, #00d4ff); }
+    th[data-dir="desc"] .sort-btn::after { content: " ↓"; content: " ↓" / ""; opacity: 1; color: var(--color, #00d4ff); }
     /* No sort glyph on the narrow # column — it wrapped onto its own line and looked like stray text */
-    th:first-child::after { content: ""; }
+    th:first-child .sort-btn::after { content: ""; }
 
     /* LEGAL DISCLAIMER */
     .disclaimer-wrap { max-width: 1100px; margin: 0 auto; padding: 0 2rem 1rem; }
@@ -596,7 +602,7 @@
         <input type="text" id="search-query" placeholder="e.g. CRISPR gene editing" data-enter="run-search">
       </div>
       <div class="form-group">
-        <label>Results: <span class="limit-val" id="search-limit-val">10</span></label>
+        <label for="search-limit">Results: <span class="limit-val" id="search-limit-val">10</span></label>
         <input type="range" id="search-limit" min="5" max="25" value="10"
                data-mirror="search-limit-val">
       </div>
@@ -616,7 +622,7 @@
         <input type="text" id="superseded-doi" placeholder="10.xxxx/xxxxx" data-enter="run-superseded">
       </div>
       <div class="form-group">
-        <label>Related works: <span class="limit-val" id="superseded-limit-val">10</span></label>
+        <label for="superseded-limit">Related works: <span class="limit-val" id="superseded-limit-val">10</span></label>
         <input type="range" id="superseded-limit" min="5" max="25" value="10"
                data-mirror="superseded-limit-val">
       </div>
@@ -1597,7 +1603,7 @@
           h += '<div class="error-box">No results found.</div>';
         } else {
           h += metaRow(esc(total != null ? total.toLocaleString() : rows.length) + ' results · source: ' + esc(source), 'search', 'retractis-search.json');
-          h += '<div class="table-wrap"><table><tr><th>#</th><th>Title</th><th>Year</th><th>DOI</th></tr>';
+          h += '<div class="table-wrap"><table>' + sortHead(['#', 'Title', 'Year', 'DOI']);
           rows.forEach((r, i) => {
             const tag = containerLabel(r.Type);
             // A journal-issue record has no title of its own; the journal name
@@ -1659,7 +1665,7 @@
           h += '<p class="meta no-authors-note">Author names are not available for this analysis — use the DOI in your reference manager.</p>';
           // Scale citation bars to the max cited_by_count (min 1 to avoid /0).
           const maxCited = Math.max(1, ...rel.map(r => r.cited_by_count || 0));
-          h += '<div class="table-wrap"><table><tr><th>#</th><th>Related work</th><th>Year</th><th>Citations</th></tr>';
+          h += '<div class="table-wrap"><table>' + sortHead(['#', 'Related work', 'Year', 'Citations']);
           rel.forEach((r, i) => {
             const cited = r.cited_by_count || 0;
             const pct = cited > 0 ? Math.max(0.001, cited / maxCited * 100).toFixed(3) : '0';
@@ -1705,16 +1711,23 @@
       qc.textContent = ' · ' + shown + ' / ' + rows.length + ' rows';
     }
 
-    // --- sortable columns (single delegated click handler on th) ------------
+    // --- sortable columns (single delegated click handler on the header button).
+    // A native <button> fires click for Enter and Space, so no key handler is needed.
+    function sortHead(labels) {
+      return '<tr>' + labels.map(l =>
+        '<th scope="col"><button type="button" class="sort-btn">' + esc(l) + '</button></th>').join('') + '</tr>';
+    }
     document.addEventListener('click', e => {
-      const th = e.target.closest('th');
+      const btn = e.target.closest('.sort-btn');
+      const th = btn && btn.closest('th');
       if (!th || !th.closest('.results')) return;
       const table = th.closest('table');
       const headRow = th.parentElement;
       const idx = Array.prototype.indexOf.call(headRow.children, th);
       const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
-      Array.from(headRow.children).forEach(cell => { delete cell.dataset.dir; });
+      Array.from(headRow.children).forEach(cell => { delete cell.dataset.dir; cell.removeAttribute('aria-sort'); });
       th.dataset.dir = dir;
+      th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
       const rows = Array.from(table.rows).filter(r => r !== headRow);
       if (!rows.length) return;
       const val = r => { const c = r.cells[idx]; return c ? c.textContent.trim() : ''; };
