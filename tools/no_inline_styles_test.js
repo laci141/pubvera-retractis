@@ -83,8 +83,8 @@ check("S4 .badge.badge-lg padding 0.2rem 0.7rem", hasDecl(".badge.badge-lg", "pa
 // ── S5: both badge strings carry badge-lg ──
 check("S5 retracted badge is class=\"badge bad badge-lg\" (found " + count("<span class=\"badge bad badge-lg\">⚠ RETRACTED</span>") + ")",
   count("<span class=\"badge bad badge-lg\">⚠ RETRACTED</span>") === 1);
-check("S5 not-retracted badge is class=\"badge ok badge-lg\" (found " + count("<span class=\"badge ok badge-lg\">✓ Not retracted</span>") + ")",
-  count("<span class=\"badge ok badge-lg\">✓ Not retracted</span>") === 1);
+check("S5 no-signal badge is class=\"badge ok badge-lg\" (found " + count("<span class=\"badge ok badge-lg\">✓ No retraction signal found</span>") + ")",
+  count("<span class=\"badge ok badge-lg\">✓ No retraction signal found</span>") === 1);
 
 // ── S6: data-bar-width and the CSSOM helper ──
 const barStr = "'<div class=\"bar-track\"><div class=\"bar-chart\" data-bar-width=\"' + pct + '\"></div></div></div>'";

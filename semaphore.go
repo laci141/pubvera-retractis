@@ -158,5 +158,9 @@ func writeCLIError(w http.ResponseWriter, err error) {
 		writeJSONError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
+	if errors.Is(err, errCLINotFound) {
+		writeJSONError(w, http.StatusNotFound, err.Error())
+		return
+	}
 	writeJSONError(w, http.StatusBadGateway, err.Error())
 }
