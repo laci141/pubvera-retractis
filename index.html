@@ -570,10 +570,10 @@
 
   <!-- MODALS -->
   <div class="modal" id="modal-check">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-check-title">
       <div class="modal-header">
-        <h2>✅ Check a Paper</h2>
-        <button class="close-btn" data-action="close-modal" data-modal="check">&times;</button>
+        <h2 id="modal-check-title">✅ Check a Paper</h2>
+        <button type="button" class="close-btn" aria-label="Close" data-action="close-modal" data-modal="check">&times;</button>
       </div>
       <div class="form-group">
         <label for="check-doi">DOI (e.g. 10.1016/S0140-6736(97)11096-0)</label>
@@ -585,10 +585,10 @@
   </div>
 
   <div class="modal" id="modal-search">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-search-title">
       <div class="modal-header">
-        <h2>🔎 Search Works</h2>
-        <button class="close-btn" data-action="close-modal" data-modal="search">&times;</button>
+        <h2 id="modal-search-title">🔎 Search Works</h2>
+        <button type="button" class="close-btn" aria-label="Close" data-action="close-modal" data-modal="search">&times;</button>
       </div>
       <div class="form-group">
         <label for="search-query">Topic or keywords</label>
@@ -605,10 +605,10 @@
   </div>
 
   <div class="modal" id="modal-superseded">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-superseded-title">
       <div class="modal-header">
-        <h2>🔁 Find Newer Research</h2>
-        <button class="close-btn" data-action="close-modal" data-modal="superseded">&times;</button>
+        <h2 id="modal-superseded-title">🔁 Find Newer Research</h2>
+        <button type="button" class="close-btn" aria-label="Close" data-action="close-modal" data-modal="superseded">&times;</button>
       </div>
       <div class="form-group">
         <label for="superseded-doi">DOI of the original paper</label>
@@ -1208,8 +1208,13 @@
 
     // --- modal plumbing -----------------------------------------------------
     const MODALS = ['check', 'search', 'superseded'];
+    // The element that opened a dialog gets focus back when it closes, so a
+    // keyboard user is not dropped at the top of the page.
+    let modalOpener = null;
     function openModal(name, prefill) {
-      MODALS.forEach(closeModal);
+      const opener = document.activeElement;
+      MODALS.forEach(m => closeModal(m, true));
+      if (opener && opener !== document.body && !opener.closest('.modal')) modalOpener = opener;
       document.getElementById('modal-' + name).classList.add('active');
       if (prefill !== undefined) {
         const input = document.getElementById(name === 'search' ? 'search-query' : name + '-doi');
@@ -1218,9 +1223,30 @@
       const focusEl = document.getElementById(name === 'search' ? 'search-query' : name + '-doi');
       setTimeout(() => focusEl.focus(), 50);
     }
-    function closeModal(name) {
-      document.getElementById('modal-' + name).classList.remove('active');
+    function closeModal(name, keepFocus) {
+      const m = document.getElementById('modal-' + name);
+      if (!m.classList.contains('active')) return;
+      m.classList.remove('active');
+      if (!keepFocus && modalOpener && document.contains(modalOpener)) modalOpener.focus();
+      if (!keepFocus) modalOpener = null;
     }
+    // Tab trap: Tab and Shift+Tab cycle inside the open dialog.
+    function modalFocusables(m) {
+      return Array.from(m.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(el => !el.disabled && !el.hidden && el.getClientRects().length > 0);
+    }
+    // Registered on each dialog, not on document: focus is inside the open
+    // dialog while it is open (openModal focuses its input).
+    function onModalTab(e) {
+      if (e.key !== 'Tab') return;
+      const m = e.currentTarget;
+      const f = modalFocusables(m);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    MODALS.forEach(name => document.getElementById('modal-' + name).addEventListener('keydown', onModalTab));
     // backdrop click + Esc (an Escape that belongs to an open Export menu closes
     // only the menu: it is prevented by the menu listener, or a menu is still open)
     MODALS.forEach(name => {
@@ -1229,7 +1255,7 @@
       });
     });
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && !e.defaultPrevented && !anyExportMenuOpen()) MODALS.forEach(closeModal);
+      if (e.key === 'Escape' && !e.defaultPrevented && !anyExportMenuOpen()) MODALS.forEach(name => closeModal(name));
     });
 
     // --- delegated actions (no inline on*= handlers, so a CSP can block them) --
