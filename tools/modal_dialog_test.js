@@ -27,7 +27,7 @@ function check(label, ok) { ran++; if (!ok) failed++; console.log((ok ? "PASS" :
 const count = s => html.split(s).length - 1;
 
 for (const n of ["check", "search", "superseded"]) {
-  const re = new RegExp('<div class="modal" id="modal-' + n + '">\\s*<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="(modal-' + n + '-title)">\\s*<div class="modal-header">\\s*<h2 id="([^"]+)">[^<]+</h2>\\s*<button ([^>]*)>');
+  const re = new RegExp('<div class="modal" id="modal-' + n + '">\\s*<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="(modal-' + n + '-title)"(?: aria-describedby="[^"]+")?>\\s*<div class="modal-header">\\s*<h2 id="([^"]+)">[^<]+</h2>\\s*<button ([^>]*)>');
   const m = html.match(re);
   check("D1 " + n + ": dialog role, aria-modal, labelledby points at its own h2", !!m && m[1] === m[2]);
   check("D2 " + n + ": close button type=button, aria-label=Close", !!m && /type="button"/.test(m[3]) && /aria-label="Close"/.test(m[3]) && new RegExp('data-modal="' + n + '"').test(m[3]));
