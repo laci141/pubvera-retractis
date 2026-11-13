@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -556,6 +557,10 @@ type supersededRequest struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
+// supersededDOIRe is the DOI shape /api/superseded accepts: an optional
+// doi: / doi.org prefix, then 10.<4-9 digits>/<suffix>, no whitespace.
+var supersededDOIRe = regexp.MustCompile(`(?i)^(?:doi:|https?://doi\.org/|https://dx\.doi\.org/)?10\.[0-9]{4,9}/\S+$`)
+
 func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "only POST")
@@ -566,6 +571,14 @@ func handleSuperseded(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validateTextArg(w, "doi", &req.DOI) {
+		return
+	}
+	// Free text such as "Wakefield 1998" used to reach the CLI, hold a CLI
+	// slot and come back as 502; the 502 JSON body is replaced on the way
+	// (Caddy or Cloudflare), so the page showed "unreadable response". A 400
+	// is passed through, so reject a non-DOI here before the CLI runs.
+	if !supersededDOIRe.MatchString(req.DOI) {
+		writeJSONError(w, http.StatusBadRequest, "doi must be a DOI such as 10.1038/nature12373")
 		return
 	}
 	if !checkCeiling(w, "limit", req.Limit, maxResultLimit) {
