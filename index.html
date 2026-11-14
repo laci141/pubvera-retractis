@@ -515,6 +515,14 @@
       .disclaimer-wrap { padding: 0 1.25rem 1rem; }
       .disclaimer { padding: 1rem 1.2rem; }
     }
+
+    /* respect the OS reduce-motion setting; the spinner stays (status indicator) */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .modal, .modal-content, .results { animation: none; }
+      *, *::before, *::after { transition: none !important; }
+      .chip:hover, .bento-card:hover, .btn:hover, .btn:active { transform: none; }
+    }
   </style>
 </head>
 <body>
