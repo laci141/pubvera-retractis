@@ -250,6 +250,10 @@
       animation: fadeIn 0.3s ease;
     }
     .modal.active { display: flex; }
+    /* an open modal stops the page behind it from scrolling, so closing it returns
+       the user to the same place; no JavaScript; browsers without :has() keep the old behaviour */
+    html:has(.modal.active) { overflow: hidden; scrollbar-gutter: stable; }
+    .modal, .modal-content { overscroll-behavior: contain; }
     #modal-check      { --color: #00d4ff; }
     #modal-search     { --color: #7c3aed; --color-text: #a78bfa; }
     #modal-superseded { --color: #22c55e; }
