@@ -41,7 +41,10 @@ FROM alpine:3.24
 # The unprivileged user the server runs as (see USER below). UID 10001 is the
 # same as pubvera-bibliovera and pubvera-grantvera. adduser -D also creates
 # /home/app, which is where the CLI keeps its small HTTP cache.
-RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 app
+# zlib CVE-2026-4738 is fixed in 1.4-r0; the OpenSSL CVEs (libcrypto3, libssl3)
+# are fixed in 3.5.9-r1. Upgrade those packages by name so the base image's
+# vulnerable builds are replaced; never a bare apk upgrade.
+RUN apk add --no-cache ca-certificates wget && apk upgrade --no-cache zlib libcrypto3 libssl3 && adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=web-builder /out/server ./server
 COPY --from=web-builder /out/index.html ./index.html
